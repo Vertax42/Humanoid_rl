@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/xbot/humanoid_rl_ws/devel/setup.sh

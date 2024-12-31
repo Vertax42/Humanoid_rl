@@ -1,0 +1,8 @@
+prefix=/home/xbot/humanoid_rl_ws/devel
+
+Name: humanoid_rl
+Description: Description of humanoid_rl
+Version: 0.0.0
+Cflags: -I/home/xbot/humanoid_rl_ws/src/humanoid_rl/include
+Libs: -L${prefix}/lib 
+Requires: rospy roscpp std_msgs

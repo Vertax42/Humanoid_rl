@@ -1,0 +1,7 @@
+model_path: "/home/xbot/policy_test.pt" # model path
+obs_dim: 93 # dimensions of observation space
+action_dim: 27 # dimensions of action space
+history_length: 15 # length of history frames
+obs_history_length: 5 # length of history observations
+lin_sensitivity: 0.2 # keyboard command sensivity for linear velocity
+ang_sensitivity: 0.2 # keyboard command sensivity for angular velocity
