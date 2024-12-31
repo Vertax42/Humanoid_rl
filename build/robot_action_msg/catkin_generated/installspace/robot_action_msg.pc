@@ -1,8 +1,0 @@
-prefix=/home/xbot/humanoid_rl_ws/install
-
-Name: robot_action_msg
-Description: Description of robot_action_msg
-Version: 0.0.1
-Cflags: -I${prefix}/include
-Libs: -L${prefix}/lib 
-Requires: std_msgs message_runtime

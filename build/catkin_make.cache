@@ -1,2 +1,0 @@
-humanoid_rl:robot_action_msg
--DCATKIN_DEVEL_PREFIX=/home/xbot/humanoid_rl_ws/devel -DCMAKE_INSTALL_PREFIX=/home/xbot/humanoid_rl_ws/install -G Unix Makefiles
