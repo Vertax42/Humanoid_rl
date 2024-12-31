@@ -16,6 +16,7 @@
 using namespace zsummer::log4z;
 
 std::mutex data_mutex; // data mutex for data synchronization
+std::mutex cmd_mutex; // command mutex for command synchronization
 std::vector<double> measured_q_;
 std::vector<double> measured_v_;
 std::vector<double> measured_tau_;
@@ -222,6 +223,12 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
 std::vector<float> get_current_obs()
 {
     std::vector<float> tmp_obs; // 93
+    Command local_cmd;
+    {
+        std::lock_guard<std::mutex> lock(cmd_mutex);
+        local_cmd = user_cmd; // Copy the shared command to a local variable
+    }
+
     // create tmp current data copy 7: neck_yaw_joint, 8: neck_pitch_joint, 17: waist_roll_joint
     std::vector<double> q; // 30
     std::vector<double> v; // 30
@@ -229,6 +236,7 @@ std::vector<float> get_current_obs()
     std::array<double, 4> quat;
     std::array<double, 3> angular_vel;
     std::array<double, 3> accel;
+   
     {
         std::lock_guard<std::mutex> lock(data_mutex); // mutex lock
         q = measured_q_;
@@ -242,13 +250,26 @@ std::vector<float> get_current_obs()
     // index of joints to remove
     std::vector<size_t> indices_to_remove = { 7, 8, 17 };
 
+    std::array<double, 3> proj_grav = quat_rotate_inverse(quat_est, gravity);
+    proj_grav[0] *= -1.;
+
+    LOGFMTD("Projected gravity: %f, %f, %f", proj_grav[0], proj_grav[1], proj_grav[2]);
     // use std::remove_if and lambda to remove elements
-    vec.erase(std::remove_if(vec.begin(), vec.end(),
+    q.erase(std::remove_if(q.begin(), q.end(),
                              [&indices_to_remove, index = 0](const auto &) mutable {
                                  return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
                                         != indices_to_remove.end();
-                             }),
-              vec.end());
+                             }), q.end());
+    v.erase(std::remove_if(v.begin(), v.end(),
+                           [&indices_to_remove, index = 0](const auto &) mutable {
+                               return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
+                                      != indices_to_remove.end();
+                           }), v.end());
+    tau.erase(std::remove_if(tau.begin(), tau.end(),
+                           [&indices_to_remove, index = 0](const auto &) mutable {
+                               return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
+                                      != indices_to_remove.end();
+                           }), tau.end());
     // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
     // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
     // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
@@ -258,7 +279,7 @@ std::vector<float> get_current_obs()
     // 6. joint rel velocity [v1, v2, ..., v30], [27], 73 # default_joints_vel set to 0 Unoise(n_min=-1.5, n_max=1.5)
     // 7. last_action [a1, a2, ..., a27], [27], 94 # Unoise(n_min=-0.1, n_max=0.1)
     // now we do not use the headding observation so the obs_dim is 93
-    
+    return tmp_obs;
 }
 
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
