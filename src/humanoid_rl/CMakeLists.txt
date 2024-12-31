@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(humanoid_rl)
 
+set(CMAKE_BUILD_TYPE "Debug")
 ## Use C++17
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,6 +46,7 @@ include_directories(
 add_executable(${PROJECT_NAME}_node
   src/humanoid_policy.cpp
   src/humanoid_rl_inference.cpp
+  src/humanoid_state_machine.cpp
   src/body_control.cpp
   include/common_tools/log4z.cpp
   include/common_tools/utils_common.cpp

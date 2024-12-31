@@ -1,22 +1,24 @@
-#include <chrono>
-#include <thread>
-#include <fcntl.h>
-#include <mutex>
-#include <unistd.h>
-#include <termios.h>
-#include <ros/ros.h>
 #include "humanoid_rl_inference.h"
 #include "body_control.h"
 #include "humanoid_policy.h"
+#include "humanoid_state_machine.h"
 #include "log4z.h"
 #include "utils_logger.hpp"
 #include "version.h"
+#include <chrono>
+#include <fcntl.h>
+#include <mutex>
+#include <ros/ros.h>
+#include <termios.h>
+#include <thread>
+#include <unistd.h>
 
 
 using namespace zsummer::log4z;
 
 std::mutex data_mutex; // data mutex for data synchronization
 std::mutex cmd_mutex; // command mutex for command synchronization
+std::deque<double> hist_yaw;
 std::vector<double> measured_q_;
 std::vector<double> measured_v_;
 std::vector<double> measured_tau_;
@@ -46,6 +48,39 @@ bool getParamHelper(ros::NodeHandle &nh, const std::string &param_name, T &param
         LOGFMTE("Failed to load parameter: %s", param_name.c_str());
         return false;
     }
+    return true;
+}
+
+bool loadJointConfigs(ros::NodeHandle &nh, const std::string &param_name, std::vector<JointConfig> &default_joints)
+{
+    XmlRpc::XmlRpcValue joint_list;
+    if(!nh.getParam(param_name, joint_list))
+    {
+        LOGE("Failed to load joint configurations from parameter server!");
+        return false;
+    }
+
+    if(joint_list.getType() != XmlRpc::XmlRpcValue::TypeArray)
+    {
+        LOGE("Joint configurations parameter is not an array!");
+        return false;
+    }
+
+    for(int i = 0; i < joint_list.size(); ++i)
+    {
+        XmlRpc::XmlRpcValue &joint = joint_list[i];
+        JointConfig config;
+        config.id = static_cast<int>(joint["index"]); // 读取 index
+        config.name = static_cast<std::string>(joint["name"]);
+        config.pos_des = static_cast<double>(joint["pos_des"]);
+        config.vel_des = static_cast<double>(joint["vel_des"]);
+        config.kp = static_cast<double>(joint["kp"]);
+        config.kd = static_cast<double>(joint["kd"]);
+        config.torque = static_cast<double>(joint["torque"]);
+        default_joints.push_back(config);
+    }
+
+    LOGFMTI("Loaded %lu joint configurations successed!", default_joints.size());
     return true;
 }
 
@@ -222,10 +257,16 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
 
 std::vector<float> get_current_obs()
 {
+    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
     std::vector<float> tmp_obs; // 93
     Command local_cmd;
     {
         std::lock_guard<std::mutex> lock(cmd_mutex);
+        if(!cmd_mutex.try_lock())
+        {
+            throw std::runtime_error("Failed to acquire cmd_mutex lock.");
+            LOGE("Failed to acquire cmd_mutex lock.");
+        }
         local_cmd = user_cmd; // Copy the shared command to a local variable
     }
 
@@ -236,9 +277,14 @@ std::vector<float> get_current_obs()
     std::array<double, 4> quat;
     std::array<double, 3> angular_vel;
     std::array<double, 3> accel;
-   
+
     {
         std::lock_guard<std::mutex> lock(data_mutex); // mutex lock
+        if(!data_mutex.try_lock())
+        {
+            throw std::runtime_error("Failed to acquire data_mutex lock.");
+            LOGE("Failed to acquire data_mutex lock.");
+        }
         q = measured_q_;
         v = measured_v_;
         tau = measured_tau_;
@@ -247,29 +293,58 @@ std::vector<float> get_current_obs()
         accel = imu_accel;
     }
 
-    // index of joints to remove
+    if(q.empty() || v.empty() || tau.empty()) // check if the measured data is empty
+    {
+        throw std::runtime_error("Measured data (q, v, or tau) is empty.");
+        LOGE("Measured data (q, v, or tau) is empty.");
+    }
+
+    if(quat[0] == 0.0 && quat[1] == 0.0 && quat[2] == 0.0 && quat[3] == 0.0) // check if the quaternion is all zeros
+    {
+        throw std::runtime_error("Invalid quaternion (all zeros).");
+        LOGE("Invalid quaternion (all zeros).");
+    }
+
+    EulerAngle euler = QuaternionToEuler(Quaternion{ quat[0], quat[1], quat[2], quat[3] }); // convert quaternion to euler angle
+    if(std::isnan(euler.yaw)) // check if the yaw angle is NaN
+    {
+        throw std::runtime_error("Invalid yaw angle (NaN).");
+        LOGE("Invalid yaw angle (NaN).");
+    }
+    double current_yaw = euler.yaw * -1.0; // current yaw angle
+    
+    hist_yaw.push_back(current_yaw); // push back the current yaw angle
+    if(hist_yaw.size() >= 30) 
+        hist_yaw.pop_front(); // pop the front element if the size is greater than 10
+    double base_yaw = std::accumulate(hist_yaw.begin(), hist_yaw.end(), 0.0) / hist_yaw.size(); // calculate the average yaw angle as the base yaw angle
+    double target_yaw_angular
+        = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
+                                                                                   // velocity index of joints to remove
     std::vector<size_t> indices_to_remove = { 7, 8, 17 };
 
     std::array<double, 3> proj_grav = quat_rotate_inverse(quat_est, gravity);
     proj_grav[0] *= -1.;
 
-    LOGFMTD("Projected gravity: %f, %f, %f", proj_grav[0], proj_grav[1], proj_grav[2]);
     // use std::remove_if and lambda to remove elements
     q.erase(std::remove_if(q.begin(), q.end(),
-                             [&indices_to_remove, index = 0](const auto &) mutable {
-                                 return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
-                                        != indices_to_remove.end();
-                             }), q.end());
+                           [&indices_to_remove, index = 0](const auto &) mutable {
+                               return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
+                                      != indices_to_remove.end();
+                           }),
+            q.end());
     v.erase(std::remove_if(v.begin(), v.end(),
                            [&indices_to_remove, index = 0](const auto &) mutable {
                                return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
                                       != indices_to_remove.end();
-                           }), v.end());
+                           }),
+            v.end());
     tau.erase(std::remove_if(tau.begin(), tau.end(),
-                           [&indices_to_remove, index = 0](const auto &) mutable {
-                               return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
-                                      != indices_to_remove.end();
-                           }), tau.end());
+                             [&indices_to_remove, index = 0](const auto &) mutable {
+                                 return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
+                                        != indices_to_remove.end();
+                             }),
+              tau.end());
+
     // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
     // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
     // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
@@ -279,6 +354,46 @@ std::vector<float> get_current_obs()
     // 6. joint rel velocity [v1, v2, ..., v30], [27], 73 # default_joints_vel set to 0 Unoise(n_min=-1.5, n_max=1.5)
     // 7. last_action [a1, a2, ..., a27], [27], 94 # Unoise(n_min=-0.1, n_max=0.1)
     // now we do not use the headding observation so the obs_dim is 93
+
+    for(int i = 0; i < 3; i++) // [3]
+    {
+        tmp_obs.push_back(accel[i] * (i == 0 ? 1 : -1));
+        LOGFMTD("base linear velocity[%d]: %f", i, accel[i]);
+    }
+
+    for(int i = 0; i < 3; i++) // [6]
+    {
+        tmp_obs.push_back(angular_vel[i] * (i == 0 ? 1 : -1));
+        LOGFMTD("base angular velocity[%d]: %f", i, angular_vel[i]);
+    }
+
+    for(int i = 0; i < 3; i++) // [9]
+    {
+        tmp_obs.push_back(proj_grav[i]);
+        LOGFMTD("base projected gravity[%d]: %f", i, proj_grav[i]);
+    }
+    
+    tmp_obs.push_back(local_cmd.x); // [10]
+    tmp_obs.push_back(local_cmd.y); // [11]
+    tmp_obs.push_back(target_yaw_angular); // [12]
+    LOGFMTD("input_cmd.x: %f, input_cmd.y: %f, input_yaw_angular: %f", local_cmd.x, local_cmd.y, target_yaw_angular);
+    for(auto i : q) // [39]
+    {
+        tmp_obs.push_back(i);
+        LOGFMTD("joint position: %f", i);
+    }
+    for(auto i : v) // [66]
+    {
+        tmp_obs.push_back(i);
+        LOGFMTD("joint velocity: %f", i);
+    }
+    for(auto i : tau) // [93]
+    {
+        tmp_obs.push_back(i);
+        LOGFMTD("joint torque: %f", i);
+    }
+    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
+
     return tmp_obs;
 }
 
@@ -315,7 +430,7 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               angular_vel_local.begin()); // use angular_vel_local.begin() as output iterator
 
-    // decode imu acceleration
+    // decode imu linear velocity
     std::copy(msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size + imu_accel_size,
               imu_accel.begin()); // use imu_accel.begin() as output iterator
@@ -336,31 +451,10 @@ int main(int argc, char **argv)
     ros::NodeHandle nh;
 
     std::vector<JointConfig> default_joints;
-    XmlRpc::XmlRpcValue joint_list;
-    if(nh.getParam("default_joints", joint_list))
-    {
-        if(joint_list.getType() == XmlRpc::XmlRpcValue::TypeArray)
-        {
-            for(int i = 0; i < joint_list.size(); ++i)
-            {
-                XmlRpc::XmlRpcValue &joint = joint_list[i];
-                JointConfig config;
-                config.id = static_cast<int>(joint["index"]); // 读取 index
-                config.name = static_cast<std::string>(joint["name"]);
-                config.pos_des = static_cast<double>(joint["pos_des"]);
-                config.vel_des = static_cast<double>(joint["vel_des"]);
-                config.kp = static_cast<double>(joint["kp"]);
-                config.kd = static_cast<double>(joint["kd"]);
-                config.torque = static_cast<double>(joint["torque"]);
-                default_joints.push_back(config);
-            }
-        }
-    } else
-    {
-        LOGE("Failed to load joint configurations from parameter server!");
-        return -1;
+    if(!loadJointConfigs(nh, "default_joints", default_joints))
+    {   
+        return -1; // return -1 if failed to load joint configurations
     }
-    LOGFMTI("Loaded %lu joint configurations.", default_joints.size());
 
     ModelConfig config;
     if(loadModelConfig(nh, config))
@@ -371,7 +465,8 @@ int main(int argc, char **argv)
         LOGE("Failed to load model configuration from parameter server!");
         return -1;
     }
-
+    // humanoid state machine class
+    HumanoidStateMachine state_machine(nh);
     // humanoid policy class
     // model_path, obs_dim, action_dim, history_length, obs_history_length
     HumanoidPolicy policy(config.model_path, config.obs_dim, config.action_dim, config.history_length, config.obs_history_length);
@@ -380,23 +475,69 @@ int main(int argc, char **argv)
     ros::Subscriber sub = nh.subscribe("/controllers/xbot_controller/policy_output", 1, callback, ros::TransportHints().tcpNoDelay());
 
     std::thread inputThread(handleInput, config.lin_sensitivity, config.ang_sensitivity);
+    std::vector<double> pos_des, vel_des, kp, kd, torque; // configure for the joint control parameters
+    std::vector<float> current_obs; // current observation
+    std::vector<float> action;
     while(ros::ok())
     {
+        // reset the joint control parameters
+        pos_des.resize(N_JOINTS);
+        vel_des.resize(N_JOINTS);
+        kp.resize(N_JOINTS);
+        kd.resize(N_JOINTS);
+        torque.resize(N_JOINTS);
+
+        current_obs.clear(); // reset the current observation
+        action.clear(); // reset the action
         auto start_time = std::chrono::steady_clock::now();
-        //...............................................todo How to get current_obs
-        std::vector<float> current_obs(93, 0.0);
-        std::vector<float> action = policy.inference(current_obs);
-        for(long unsigned int i = 0; i < action.size(); i++)
+
+        auto current_state = state_machine.getCurrentState(); // get the current state
+        switch(current_state)
         {
-            LOGFMTD("Action[%lu]: %f", i, action[i]);
+        case HumanoidStateMachine::DAMPING:
+            // DAMPING STATE LOGIC
+            LOGI("DAMPING state logic...");
+            break;
+        case HumanoidStateMachine::ZERO_POS:
+            // ZERO_POS STATE LOGIC
+            LOGI("ZERO_POS state logic...");
+            break;
+        case HumanoidStateMachine::STAND:
+            // STAND STATE LOGIC
+            LOGI("STAND state logic...");
+            break;
+        case HumanoidStateMachine::WALK:
+            // WALK STATE LOGIC
+            LOGI("WALK state logic...");
+            // How to get current_obs
+            try
+            {
+                current_obs = get_current_obs();
+                // 处理观测数据
+            } catch(const std::runtime_error &e)
+            {
+                std::cerr << "Error in get_current_obs(): " << e.what() << std::endl;
+                // 处理异常情况
+            }
+            action = policy.inference(current_obs);
+            for(long unsigned int i = 0; i < action.size(); i++)
+            {
+                LOGFMTD("Action[%lu]: %f", i, action[i]);
+            }
+
+            break;
+        default:
+            LOGE("Unknown state!");
+            ROS_WARN("Unknown state!");
+            break;
         }
         auto duration = std::chrono::steady_clock::now() - start_time;
-        LOGFMTW("Inference time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+        if(current_state == HumanoidStateMachine::WALK)
+            LOGFMTW("Inference time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
         auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
         int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
         LOGFMTW("Sleep time: %d us", sleep_time);
         std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
-
         ros::spinOnce();
     }
     
