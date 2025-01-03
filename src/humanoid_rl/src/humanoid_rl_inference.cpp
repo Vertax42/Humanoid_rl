@@ -544,11 +544,11 @@ int main(int argc, char **argv)
             break;
         }
 
-        cycle_count++;
         if(cycle_count <= startup_cycle && !initFlag) {
             init_pos = measured_q_;
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
+            cycle_count++;
             continue;
         } else if(cycle_count <= init_cycle && !initFlag) {
             // upper body init to damping mode
@@ -571,43 +571,61 @@ int main(int argc, char **argv)
             }
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
+            cycle_count++;
             continue;
         } else if(cycle_count > init_cycle && !initFlag) {
             initFlag = true;
             LOGFMTI("Initialization finished in %ld cycles!", cycle_count);
         }
 
-        // if(initFlag) {
-        //     auto current_state = state_machine.getCurrentState(); // get the current state
-        //     switch(current_state) {
-        //         case HumanoidStateMachine::DAMPING:
-        //         // DAMPING STATE LOGIC
-        //         LOGI("DAMPING state logic...");
-        //         break;
-        //         case HumanoidStateMachine::ZERO_POS:
-        //         // ZERO_POS STATE LOGIC
-        //         LOGI("ZERO_POS state logic...");
-        //         break;
-        //         case HumanoidStateMachine::STAND:
-        //         // STAND STATE LOGIC
-        //         LOGI("STAND state logic...");
-        //         break;
-        //         case HumanoidStateMachine::WALK:
-        //         // WALK STATE LOGIC
-        //         LOGI("WALK state logic...");
-        //         // How to get current_obs
-        //         action = policy.inference(current_obs);
-        //         for(long unsigned int i = 0; i < action.size(); i++)
-        //         {
-        //             LOGFMTD("Action[%lu]: %f", i, action[i]);
-        //         }
-        //         break;
-        //     default:
-        //         LOGE("Unknown state!");
-        //         ROS_WARN("Unknown state!");
-        //         break;
-        //     }
-        // }
+        if(initFlag) {
+            auto current_state = state_machine.getCurrentState(); // get the current state
+            switch(current_state) {
+                case HumanoidStateMachine::DAMPING:
+                    // DAMPING STATE LOGIC
+                    LOGI("DAMPING state logic...");
+                    break;
+                case HumanoidStateMachine::ZERO_POS:
+                    // ZERO_POS STATE LOGIC
+                    LOGI("ZERO_POS state logic...");
+                    for(int i = 0; i < N_HAND_JOINTS; i++) {
+                        pos_des[i] = init_pos[6 + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + i]);
+                        vel_des[i] = 0.0;
+                        kp[i] = 200.0;
+                        kd[i] = 10.0;
+                        torque[i] = 0.0;
+                    }
+                    // lower body init to damping mode
+                    for(int i = 0; i < N_LEG_JOINTS; i++) {
+                        pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
+                        vel_des[N_HAND_JOINTS + i] = 0.0;
+                        kp[N_HAND_JOINTS + i] = 300.0;
+                        kd[N_HAND_JOINTS + i] = 10.0;
+                        torque[N_HAND_JOINTS + i] = 0.0;
+                    }
+                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                    pub.publish(control_msg);
+                    break;
+                case HumanoidStateMachine::STAND:
+                    // STAND STATE LOGIC
+                    LOGI("STAND state logic...");
+                    break;
+                case HumanoidStateMachine::WALK:
+                    // WALK STATE LOGIC
+                    LOGI("WALK state logic...");
+                    // How to get current_obs
+                    action = policy.inference(current_obs); // action is a vector of float 27 dim
+                    for(long unsigned int i = 0; i < action.size(); i++)
+                    {
+                        LOGFMTD("Action[%lu]: %f", i, action[i]);
+                    }
+                    break;
+                default:
+                    LOGE("Unknown state!");
+                    ROS_WARN("Unknown state!");
+                    break;
+            }
+        }
         
         auto duration = std::chrono::steady_clock::now() - start_time;
         if(current_state == HumanoidStateMachine::WALK)
