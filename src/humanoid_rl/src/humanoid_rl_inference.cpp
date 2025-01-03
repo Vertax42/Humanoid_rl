@@ -18,6 +18,7 @@ using namespace zsummer::log4z;
 
 std::mutex data_mutex; // data mutex for data synchronization
 std::mutex cmd_mutex; // command mutex for command synchronization
+
 std::deque<double> hist_yaw;
 std::vector<double> measured_q_;
 std::vector<double> measured_v_;
@@ -29,7 +30,7 @@ std::array<double, 3> imu_accel;
 struct Command {
     // 1 for moving, 0 for standing used for yaw while stand
     double x, y, yaw, heading, move;
-    Command(double _x = -0.2, double _y = 0.0, double _yaw = 0.0, double _heading = 0.64, double _move = 0.)
+    Command(double _x = 0.0, double _y = 0.0, double _yaw = 0.0, double _heading = 0.64, double _move = 0.)
         : x(_x), y(_y), yaw(_yaw), heading(_heading), move(_move)
     {}
 } user_cmd;
@@ -261,14 +262,14 @@ std::vector<float> get_current_obs()
     std::vector<float> tmp_obs; // 93
     Command local_cmd;
     {
-        std::lock_guard<std::mutex> lock(cmd_mutex);
+        std::lock_guard<std::mutex> cmd_lock(cmd_mutex);
         local_cmd = user_cmd; // Copy the shared command to a local variable
     }
 
     // create tmp current data copy 7: neck_yaw_joint, 8: neck_pitch_joint, 17: waist_roll_joint
-    std::vector<double> q; // 30
-    std::vector<double> v; // 30
-    std::vector<double> tau; // 30
+    std::vector<double> q, tmp_q; // 30
+    std::vector<double> v, tmp_v; // 30
+    std::vector<double> tau, tmp_tau; // 30
     std::array<double, 4> quat;
     std::array<double, 3> angular_vel;
     std::array<double, 3> accel;
@@ -287,7 +288,9 @@ std::vector<float> get_current_obs()
     {   
         LOGFMTD("q, v, tau vector size: %ld, %ld, %ld", q.size(), v.size(), v.size());
         LOGE("Measured data (q, v, or tau) is empty.");
-        throw std::runtime_error("Measured data (q, v, or tau) is empty.");
+        // throw std::runtime_error("Measured data (q, v, or tau) is empty.");
+        LOGE("Observation data not ready, return empty observation!");
+        return std::vector<float>();
     }
 
     if(quat[0] == 0.0 && quat[1] == 0.0 && quat[2] == 0.0 && quat[3] == 0.0) // check if the quaternion is all zeros
@@ -311,39 +314,19 @@ std::vector<float> get_current_obs()
     double target_yaw_angular
         = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
                                                                                    // velocity index of joints to remove
-    std::vector<size_t> indices_to_remove = { 7, 8, 17 };
-
+    LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
     std::array<double, 3> proj_grav = quat_rotate_inverse(quat_est, gravity);
     proj_grav[0] *= -1.;
 
     // use std::remove_if and lambda to remove elements
-    q.erase(std::remove_if(q.begin(), q.end(),
-                           [&indices_to_remove, index = 0](const auto &) mutable {
-                               return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
-                                      != indices_to_remove.end();
-                           }),
-            q.end());
-    v.erase(std::remove_if(v.begin(), v.end(),
-                           [&indices_to_remove, index = 0](const auto &) mutable {
-                               return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
-                                      != indices_to_remove.end();
-                           }),
-            v.end());
-    tau.erase(std::remove_if(tau.begin(), tau.end(),
-                             [&indices_to_remove, index = 0](const auto &) mutable {
-                                 return std::find(indices_to_remove.begin(), indices_to_remove.end(), index++)
-                                        != indices_to_remove.end();
-                             }),
-              tau.end());
-
     // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
     // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
     // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
-    // 4. input commands [vx, vy, vyaw, vheading], [4], 13 # user_cmd.x, user_cmd.y, user_cmd.yaw, user_cmd.heading
-    // 5. joint rel position [q1, q2, ..., q30], [27], 43 # default_joints_pos set to 0 Unoise(n_min=-0.01,
+    // 4. input commands [vx, vy, vyaw, ----vheading], [3], 12 # user_cmd.x, user_cmd.y, user_cmd.yaw, user_cmd.heading
+    // 5. joint rel position [q1, q2, ..., q30], [27], 39 # default_joints_pos set to 0 Unoise(n_min=-0.01,
     // n_max=0.01)
-    // 6. joint rel velocity [v1, v2, ..., v30], [27], 73 # default_joints_vel set to 0 Unoise(n_min=-1.5, n_max=1.5)
-    // 7. last_action [a1, a2, ..., a27], [27], 94 # Unoise(n_min=-0.1, n_max=0.1)
+    // 6. joint rel velocity [v1, v2, ..., v30], [27], 66 # default_joints_vel set to 0 Unoise(n_min=-1.5, n_max=1.5)
+    // 7. last_action [a1, a2, ..., a27], [27], 93 # Unoise(n_min=-0.1, n_max=0.1)
     // now we do not use the headding observation so the obs_dim is 93
 
     for(int i = 0; i < 3; i++) // [3]
@@ -368,21 +351,43 @@ std::vector<float> get_current_obs()
     tmp_obs.push_back(local_cmd.y); // [11]
     tmp_obs.push_back(target_yaw_angular); // [12]
     LOGFMTD("input_cmd.x: %f, input_cmd.y: %f, input_yaw_angular: %f", local_cmd.x, local_cmd.y, target_yaw_angular);
-    for(auto i : q) // [39]
-    {
-        tmp_obs.push_back(i);
-        // LOGFMTD("joint position: %f", i);
+    std::vector<size_t> skip_indices = {0, 1, 2, 3, 4, 5, 7+6, 8+6, 17+6};
+    for (size_t i = 0; i < q.size(); i++) {
+        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
+            continue; // 跳过当前元素
+        }
+        tmp_obs.push_back(q[i]);
     }
-    for(auto i : v) // [66]
-    {
-        tmp_obs.push_back(i);
-        // LOGFMTD("joint velocity: %f", i);
+    for (size_t i = 0; i < v.size(); i++) {
+        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
+            continue; // 跳过当前元素
+        }
+        tmp_obs.push_back(v[i]);
     }
-    for(auto i : tau) // [93]
-    {
-        tmp_obs.push_back(i);
-        // LOGFMTD("joint torque: %f", i);
+    for (size_t i = 0; i < tau.size(); i++) {
+        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
+            continue; // 跳过当前元素
+        }
+        tmp_obs.push_back(tau[i]);
     }
+    // for(auto i : q) // [39]
+    // {
+    //     tmp_obs.push_back(i);
+    //     // LOGFMTD("joint position: %f", i);
+    // }
+    // LOGFMTD("obs_q's size: %ld", q.size());
+    // for(auto i : v) // [66]
+    // {
+    //     tmp_obs.push_back(i);
+    //     // LOGFMTD("joint velocity: %f", i);
+    // }
+    // LOGFMTD("obs_v's size: %ld", v.size());
+    // for(auto i : tau) // [93]
+    // {
+    //     tmp_obs.push_back(i);
+    //     // LOGFMTD("joint torque: %f", i);
+    // }
+    LOGFMTD("tmp_obs's final size: %ld", tmp_obs.size());
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
 
     return tmp_obs;
@@ -391,27 +396,36 @@ std::vector<float> get_current_obs()
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
+    LOGFMTD("Callback function called!");
     const int meanless_size = 6;                       // meanless size
     const int total_joints = meanless_size + N_JOINTS; // meanless + joint size
     const int quat_size = 4;                       // quat size
     const int angular_vel_size = 3;                // ang vel size
     const int imu_accel_size = 3;                  // IMU acc size
     
-    std::lock_guard<std::mutex> lock(data_mutex); // lock mutex
     if(msg->data.size() < total_joints * 3 + quat_size + angular_vel_size + imu_accel_size)
     {
         LOGE("Invalid data size in Float64MultiArray message!");
         ROS_ERROR("Invalid data size in Float64MultiArray message!");
         return;
     }
+
+    measured_q_.clear();
+    measured_v_.clear();
+    measured_tau_.clear();
+
     LOGFMTD("Received data size: %lu", msg->data.size());
+    std::lock_guard<std::mutex> lock(data_mutex);
     // position, velocity, torque
     measured_q_.assign(msg->data.begin(), msg->data.begin() + total_joints);
-    LOGFMTD("Received measure_q_ size: %lu", measured_q_.size());
+    LOGFMTD("Assigned measured_q_'s size: %ld", measured_q_.size());
+    
     measured_v_.assign(msg->data.begin() + total_joints, msg->data.begin() + 2 * total_joints);
-    LOGFMTD("Received measure_v_ size: %lu", measured_v_.size());
+    LOGFMTD("Assigned measured_v_'s size: %ld", measured_v_.size());
+    
     measured_tau_.assign(msg->data.begin() + 2 * total_joints, msg->data.begin() + 3 * total_joints);
-    LOGFMTD("Received measure_tau_ size: %lu", measured_tau_.size());
+    LOGFMTD("Assigned measured_tau_'s size: %ld", measured_q_.size());
+    
     // decode quaternion
     std::copy(msg->data.begin() + 3 * total_joints, msg->data.begin() + 3 * total_joints + quat_size,
               quat_est.begin()); // 使用 quat_est.begin() 作为输出迭代器
@@ -426,7 +440,7 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size + imu_accel_size,
               imu_accel.begin()); // use imu_accel.begin() as output iterator
     
-    LOGE("Callback function!");
+    // LOGE("Callback function!");
     if(measured_q_.empty() || measured_v_.empty() || measured_tau_.empty()) {
         LOGE("Callback function Error!!!!!!!!!!!!!");
         LOGE("+++++++++++++++++++++++++++++++++++++++");
@@ -449,6 +463,10 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "humanoid_policy_inference");
     ros::NodeHandle nh;
 
+    ros::Publisher pub = nh.advertise<std_msgs::Float64MultiArray>("/policy_input", 1);
+    ros::Subscriber sub = nh.subscribe("/controllers/xbot_controller/policy_output", 1, callback, ros::TransportHints().tcpNoDelay());
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+ 
     std::vector<JointConfig> default_joints;
     if(!loadJointConfigs(nh, "default_joints", default_joints))
     {   
@@ -469,9 +487,6 @@ int main(int argc, char **argv)
     // humanoid policy class
     // model_path, obs_dim, action_dim, history_length, obs_history_length
     HumanoidPolicy policy(config.model_path, config.obs_dim, config.action_dim, config.history_length, config.obs_history_length);
-
-    ros::Publisher pub = nh.advertise<std_msgs::Float64MultiArray>("/policy_input", 1);
-    ros::Subscriber sub = nh.subscribe("/controllers/xbot_controller/policy_output", 1, callback, ros::TransportHints().tcpNoDelay());
 
     std::thread inputThread(handleInput, config.lin_sensitivity, config.ang_sensitivity);
     std::vector<double> pos_des, vel_des, kp, kd, torque; // configure for the joint control parameters
@@ -498,55 +513,69 @@ int main(int argc, char **argv)
 
         auto current_state = state_machine.getCurrentState(); // get the current state
         LOGFMTI("Current state machine is: %s", state_machine.stateToString(current_state).c_str());
+        // wait until measured_data are not empty
         try {
             current_obs = get_current_obs();
             // get the current observation
         } catch(const std::runtime_error &e) {
-            std::cerr << "Error in get_current_obs(): " << e.what() << std::endl;
+            LOGE("ERROR in get_current_obs()!!");
+            std::this_thread::sleep_for(std::chrono::milliseconds(2)); // wait for 2 ms
+            continue; // jump out of the current loop
             // error in get_current_obs
         }
-        // if(initFlag && (current_obs[8] > -0.8)) // current_robot_state error
-        // {
-        //     LOGE("Robot state error: send joint command as shown below:");
-        //     for (int i = 0; i < N_JOINTS; i++)
-        //     {
-        //         pos_des[i] = 0.0;  // target zero position
-        //         vel_des[i] = 0.0;  // target zero velocity
-        //         kp[i] = 0.0;       // close position control
-        //         kd[i] = 2.0;       // set damping value 2.0
-        //         torque[i] = 0.0;   // zero torque
-        //         // add logs for debug
-        //         LOGFMTD("Pub joint %d command message: pos_des = %.2f, vel_des = %.2f, kp = %.2f, kd = %.2f, torque = %.2f", i, pos_des[i], vel_des[i], kp[i], kd[i], torque[i]);
-        //     }
-        //     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
-        //     pub.publish(control_msg);
-        //     LOGE("ROS Shut Down!");
-        //     ros::shutdown();
-        //     break;
-        // }
+        LOGFMTD("Current observation size: %lu", current_obs.size());
+        if(initFlag && (current_obs[8] > -0.8)) // current_robot_state error
+        {
+            LOGE("Robot state error: send joint command as shown below:");
+            for (int i = 0; i < N_JOINTS; i++)
+            {
+                pos_des[i] = 0.0;  // target zero position
+                vel_des[i] = 0.0;  // target zero velocity
+                kp[i] = 0.0;       // close position control
+                kd[i] = 2.0;       // set damping value 2.0
+                torque[i] = 0.0;   // zero torque
+                // add logs for debug
+                LOGFMTD("Pub joint %d command message: pos_des = %.2f, vel_des = %.2f, kp = %.2f, kd = %.2f, torque = %.2f", i, pos_des[i], vel_des[i], kp[i], kd[i], torque[i]);
+            }
+            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+            pub.publish(control_msg);
+            LOGE("ROS Shut Down!");
+            ros::shutdown();
+            break;
+        }
 
-        // cycle_count++;
-        // if(cycle_count <= startup_cycle && !initFlag) {
-        //     init_pos = measured_q_;
-        //     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
-        //     pub.publish(control_msg);
-        //     continue;
-        // } else if(startup_cycle < cycle_count && cycle_count <= init_cycle && !initFlag) {
-        //     for(int i = 0; i < N_JOINTS; i++)
-        //     {
-        //         pos_des[i] = init_pos[i];
-        //         vel_des[i] = 0.0;
-        //         kp[i] = 0.0;
-        //         kd[i] = 2.0;
-        //         torque[i] = 0.0;
-        //     }
-        //     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
-        //     pub.publish(control_msg);
-        //     continue;
-        // } else if(cycle_count > init_cycle && !initFlag) {
-        //     initFlag = true;
-        //     LOGFMTI("Initialization finished in %ld cycles!", cycle_count);
-        // }
+        cycle_count++;
+        if(cycle_count <= startup_cycle && !initFlag) {
+            init_pos = measured_q_;
+            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+            pub.publish(control_msg);
+            continue;
+        } else if(cycle_count <= init_cycle && !initFlag) {
+            // upper body init to damping mode
+            for(int i = 0; i < N_HAND_JOINTS; i++)
+            {
+                pos_des[i] = init_pos[6 + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + i]);
+                vel_des[i] = 0.0;
+                kp[i] = 200.0;
+                kd[i] = 10.0;
+                torque[i] = 0.0;
+            }
+            // lower body init to damping mode
+            for(int i = 0; i < N_LEG_JOINTS; i++)
+            {
+                pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
+                vel_des[N_HAND_JOINTS + i] = 0.0;
+                kp[N_HAND_JOINTS + i] = 300.0;
+                kd[N_HAND_JOINTS + i] = 10.0;
+                torque[N_HAND_JOINTS + i] = 0.0;
+            }
+            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+            pub.publish(control_msg);
+            continue;
+        } else if(cycle_count > init_cycle && !initFlag) {
+            initFlag = true;
+            LOGFMTI("Initialization finished in %ld cycles!", cycle_count);
+        }
 
         // if(initFlag) {
         //     auto current_state = state_machine.getCurrentState(); // get the current state

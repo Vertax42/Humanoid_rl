@@ -4,6 +4,7 @@
 #include <ros/ros.h>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <array>
 #include <std_msgs/Float64MultiArray.h>
 
