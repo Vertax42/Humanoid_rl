@@ -262,11 +262,6 @@ std::vector<float> get_current_obs()
     Command local_cmd;
     {
         std::lock_guard<std::mutex> lock(cmd_mutex);
-        if(!cmd_mutex.try_lock())
-        {
-            throw std::runtime_error("Failed to acquire cmd_mutex lock.");
-            LOGE("Failed to acquire cmd_mutex lock.");
-        }
         local_cmd = user_cmd; // Copy the shared command to a local variable
     }
 
@@ -280,11 +275,6 @@ std::vector<float> get_current_obs()
 
     {
         std::lock_guard<std::mutex> lock(data_mutex); // mutex lock
-        if(!data_mutex.try_lock())
-        {
-            throw std::runtime_error("Failed to acquire data_mutex lock.");
-            LOGE("Failed to acquire data_mutex lock.");
-        }
         q = measured_q_;
         v = measured_v_;
         tau = measured_tau_;
@@ -294,9 +284,10 @@ std::vector<float> get_current_obs()
     }
 
     if(q.empty() || v.empty() || tau.empty()) // check if the measured data is empty
-    {
-        throw std::runtime_error("Measured data (q, v, or tau) is empty.");
+    {   
+        LOGFMTD("q, v, tau vector size: %ld, %ld, %ld", q.size(), v.size(), v.size());
         LOGE("Measured data (q, v, or tau) is empty.");
+        throw std::runtime_error("Measured data (q, v, or tau) is empty.");
     }
 
     if(quat[0] == 0.0 && quat[1] == 0.0 && quat[2] == 0.0 && quat[3] == 0.0) // check if the quaternion is all zeros
@@ -380,17 +371,17 @@ std::vector<float> get_current_obs()
     for(auto i : q) // [39]
     {
         tmp_obs.push_back(i);
-        LOGFMTD("joint position: %f", i);
+        // LOGFMTD("joint position: %f", i);
     }
     for(auto i : v) // [66]
     {
         tmp_obs.push_back(i);
-        LOGFMTD("joint velocity: %f", i);
+        // LOGFMTD("joint velocity: %f", i);
     }
     for(auto i : tau) // [93]
     {
         tmp_obs.push_back(i);
-        LOGFMTD("joint torque: %f", i);
+        // LOGFMTD("joint torque: %f", i);
     }
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
 
@@ -399,7 +390,7 @@ std::vector<float> get_current_obs()
 
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
 {
-
+    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
     const int meanless_size = 6;                       // meanless size
     const int total_joints = meanless_size + N_JOINTS; // meanless + joint size
     const int quat_size = 4;                       // quat size
@@ -413,14 +404,14 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
         ROS_ERROR("Invalid data size in Float64MultiArray message!");
         return;
     }
-
+    LOGFMTD("Received data size: %lu", msg->data.size());
     // position, velocity, torque
     measured_q_.assign(msg->data.begin(), msg->data.begin() + total_joints);
-
+    LOGFMTD("Received measure_q_ size: %lu", measured_q_.size());
     measured_v_.assign(msg->data.begin() + total_joints, msg->data.begin() + 2 * total_joints);
-
+    LOGFMTD("Received measure_v_ size: %lu", measured_v_.size());
     measured_tau_.assign(msg->data.begin() + 2 * total_joints, msg->data.begin() + 3 * total_joints);
-
+    LOGFMTD("Received measure_tau_ size: %lu", measured_tau_.size());
     // decode quaternion
     std::copy(msg->data.begin() + 3 * total_joints, msg->data.begin() + 3 * total_joints + quat_size,
               quat_est.begin()); // 使用 quat_est.begin() 作为输出迭代器
@@ -434,6 +425,14 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
     std::copy(msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size + imu_accel_size,
               imu_accel.begin()); // use imu_accel.begin() as output iterator
+    
+    LOGE("Callback function!");
+    if(measured_q_.empty() || measured_v_.empty() || measured_tau_.empty()) {
+        LOGE("Callback function Error!!!!!!!!!!!!!");
+        LOGE("+++++++++++++++++++++++++++++++++++++++");
+    }
+    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
+    return;
 }
 
 int main(int argc, char **argv)
@@ -478,8 +477,14 @@ int main(int argc, char **argv)
     std::vector<double> pos_des, vel_des, kp, kd, torque; // configure for the joint control parameters
     std::vector<float> current_obs; // current observation
     std::vector<float> action;
+    unsigned long cycle_count = 0;
+    constexpr unsigned long startup_cycle = 100;
+    constexpr unsigned long init_cycle = 500;
+    bool initFlag = false;
+    std_msgs::Float64MultiArray control_msg;
     while(ros::ok())
-    {
+    {   
+        static std::vector<double> init_pos;
         // reset the joint control parameters
         pos_des.resize(N_JOINTS);
         vel_des.resize(N_JOINTS);
@@ -492,45 +497,89 @@ int main(int argc, char **argv)
         auto start_time = std::chrono::steady_clock::now();
 
         auto current_state = state_machine.getCurrentState(); // get the current state
-        switch(current_state)
-        {
-        case HumanoidStateMachine::DAMPING:
-            // DAMPING STATE LOGIC
-            LOGI("DAMPING state logic...");
-            break;
-        case HumanoidStateMachine::ZERO_POS:
-            // ZERO_POS STATE LOGIC
-            LOGI("ZERO_POS state logic...");
-            break;
-        case HumanoidStateMachine::STAND:
-            // STAND STATE LOGIC
-            LOGI("STAND state logic...");
-            break;
-        case HumanoidStateMachine::WALK:
-            // WALK STATE LOGIC
-            LOGI("WALK state logic...");
-            // How to get current_obs
-            try
-            {
-                current_obs = get_current_obs();
-                // 处理观测数据
-            } catch(const std::runtime_error &e)
-            {
-                std::cerr << "Error in get_current_obs(): " << e.what() << std::endl;
-                // 处理异常情况
-            }
-            action = policy.inference(current_obs);
-            for(long unsigned int i = 0; i < action.size(); i++)
-            {
-                LOGFMTD("Action[%lu]: %f", i, action[i]);
-            }
-
-            break;
-        default:
-            LOGE("Unknown state!");
-            ROS_WARN("Unknown state!");
-            break;
+        LOGFMTI("Current state machine is: %s", state_machine.stateToString(current_state).c_str());
+        try {
+            current_obs = get_current_obs();
+            // get the current observation
+        } catch(const std::runtime_error &e) {
+            std::cerr << "Error in get_current_obs(): " << e.what() << std::endl;
+            // error in get_current_obs
         }
+        // if(initFlag && (current_obs[8] > -0.8)) // current_robot_state error
+        // {
+        //     LOGE("Robot state error: send joint command as shown below:");
+        //     for (int i = 0; i < N_JOINTS; i++)
+        //     {
+        //         pos_des[i] = 0.0;  // target zero position
+        //         vel_des[i] = 0.0;  // target zero velocity
+        //         kp[i] = 0.0;       // close position control
+        //         kd[i] = 2.0;       // set damping value 2.0
+        //         torque[i] = 0.0;   // zero torque
+        //         // add logs for debug
+        //         LOGFMTD("Pub joint %d command message: pos_des = %.2f, vel_des = %.2f, kp = %.2f, kd = %.2f, torque = %.2f", i, pos_des[i], vel_des[i], kp[i], kd[i], torque[i]);
+        //     }
+        //     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+        //     pub.publish(control_msg);
+        //     LOGE("ROS Shut Down!");
+        //     ros::shutdown();
+        //     break;
+        // }
+
+        // cycle_count++;
+        // if(cycle_count <= startup_cycle && !initFlag) {
+        //     init_pos = measured_q_;
+        //     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+        //     pub.publish(control_msg);
+        //     continue;
+        // } else if(startup_cycle < cycle_count && cycle_count <= init_cycle && !initFlag) {
+        //     for(int i = 0; i < N_JOINTS; i++)
+        //     {
+        //         pos_des[i] = init_pos[i];
+        //         vel_des[i] = 0.0;
+        //         kp[i] = 0.0;
+        //         kd[i] = 2.0;
+        //         torque[i] = 0.0;
+        //     }
+        //     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+        //     pub.publish(control_msg);
+        //     continue;
+        // } else if(cycle_count > init_cycle && !initFlag) {
+        //     initFlag = true;
+        //     LOGFMTI("Initialization finished in %ld cycles!", cycle_count);
+        // }
+
+        // if(initFlag) {
+        //     auto current_state = state_machine.getCurrentState(); // get the current state
+        //     switch(current_state) {
+        //         case HumanoidStateMachine::DAMPING:
+        //         // DAMPING STATE LOGIC
+        //         LOGI("DAMPING state logic...");
+        //         break;
+        //         case HumanoidStateMachine::ZERO_POS:
+        //         // ZERO_POS STATE LOGIC
+        //         LOGI("ZERO_POS state logic...");
+        //         break;
+        //         case HumanoidStateMachine::STAND:
+        //         // STAND STATE LOGIC
+        //         LOGI("STAND state logic...");
+        //         break;
+        //         case HumanoidStateMachine::WALK:
+        //         // WALK STATE LOGIC
+        //         LOGI("WALK state logic...");
+        //         // How to get current_obs
+        //         action = policy.inference(current_obs);
+        //         for(long unsigned int i = 0; i < action.size(); i++)
+        //         {
+        //             LOGFMTD("Action[%lu]: %f", i, action[i]);
+        //         }
+        //         break;
+        //     default:
+        //         LOGE("Unknown state!");
+        //         ROS_WARN("Unknown state!");
+        //         break;
+        //     }
+        // }
+        
         auto duration = std::chrono::steady_clock::now() - start_time;
         if(current_state == HumanoidStateMachine::WALK)
             LOGFMTW("Inference time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
@@ -540,6 +589,8 @@ int main(int argc, char **argv)
         std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
         ros::spinOnce();
     }
+    if(inputThread.joinable())
+        inputThread.join();
     
     LOGA("main quit........");
     return 0;

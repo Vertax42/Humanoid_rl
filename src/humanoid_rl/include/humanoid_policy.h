@@ -20,6 +20,9 @@ public:
     // 推理函数，输入当前观测，返回动作
     std::vector<float> inference(const std::vector<float>& observation);
 
+    // 回调预热 && 保存历史观测
+    size_t record_ObsHistory(const std::vector<float>& observation);
+
     // 获取历史观测和动作
     const std::deque<std::vector<float>>& get_ObsHistory() const;
     const std::vector<float>& get_LastAction() const;

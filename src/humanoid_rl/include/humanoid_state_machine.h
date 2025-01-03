@@ -13,10 +13,10 @@ public:
     HumanoidStateMachine(ros::NodeHandle &nh);
     void stateCallback(const std_msgs::String::ConstPtr &msg);
     State getCurrentState();
-
+    std::string stateToString(State state);
+    
 private:
     bool isValidTransition(State current, State next);
-    std::string stateToString(State state);
 
     ros::NodeHandle &nh_;
     ros::Subscriber state_sub_;

@@ -54,6 +54,15 @@ std::vector<float> HumanoidPolicy::inference(const std::vector<float>& observati
     return action;
 }
 
+// record history observation
+size_t HumanoidPolicy::record_ObsHistory(const std::vector<float>& observation){
+    _obs_history.push_back(observation);
+    if (_obs_history.size() >= _history_length) {
+        _obs_history.pop_front();
+    }
+    return _obs_history.size();
+}
+
 // get history observation
 const std::deque<std::vector<float>>& HumanoidPolicy::get_ObsHistory() const {
     return _obs_history;
@@ -126,10 +135,10 @@ void HumanoidPolicy::update_History(const std::vector<float>& obs, const std::ve
         throw std::invalid_argument("Action size mismatch: expected " + std::to_string(_action_dim) + ", got " + std::to_string(action.size()));
     }
     // update observation history
+    _obs_history.push_back(obs);
     if (_obs_history.size() >= _history_length) {
         _obs_history.pop_front();
     }
-    _obs_history.push_back(obs);
 
     // update last_action
     _last_action = action;

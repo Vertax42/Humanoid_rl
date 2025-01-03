@@ -4,6 +4,7 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <vector>
 
+constexpr double PI = 3.14159265358979323846;
 constexpr int CONTROL_FREQUENCY = 100;
 constexpr int N_JOINTS = 30;
 constexpr int N_HAND_JOINTS = 18; // left arm(7) + neck(2) + right arm(7) + waist(2)
