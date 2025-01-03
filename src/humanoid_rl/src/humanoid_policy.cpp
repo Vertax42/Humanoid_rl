@@ -20,10 +20,10 @@ HumanoidPolicy::HumanoidPolicy(const std::string& model_path, int obs_dim, int a
     LOGI("=============================================================");
     LOGFMTI("HumanoidPolicy object is being created.");
     LOGFMTI("Model path: %s", model_path.c_str());
-    LOGFMTI("Observation dimension: %d", _obs_dim);
-    LOGFMTI("Action dimension: %d", _action_dim);
-    LOGFMTI("History length: %d", _history_length);
-    LOGFMTI("Observation history length: %d", _obs_history_length);
+    LOGFMTI("Observation dimension: %ld", _obs_dim);
+    LOGFMTI("Action dimension: %ld", _action_dim);
+    LOGFMTI("History length: %ld", _history_length);
+    LOGFMTI("Observation history length: %ld", _obs_history_length);
     LOGI("=============================================================");
     print_Model();
 }

@@ -34,12 +34,12 @@ private:
     torch::jit::script::Module _model;
 
     // input and output dimensions
-    int _obs_dim;
-    int _action_dim;
+    size_t _obs_dim;
+    size_t _action_dim;
 
     // record_length
-    int _history_length;
-    int _obs_history_length;
+    size_t _history_length;
+    size_t _obs_history_length;
 
     // history of observations and actions
     std::deque<std::vector<float>> _obs_history;
