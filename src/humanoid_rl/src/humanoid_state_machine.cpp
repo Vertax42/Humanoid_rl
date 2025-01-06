@@ -35,7 +35,7 @@ void HumanoidStateMachine::stateCallback(const std_msgs::String::ConstPtr &msg)
     {
         previous_state_ = current_state_;
         current_state_ = new_state;
-        LOGFMTI("State changed from %s to: %s", previous_state_.c_str(), current_state_.c_str());
+        LOGFMTI("State changed from %s to: %s", stateToString(previous_state_).c_str(), stateToString(current_state_).c_str());
     } else
     {
         LOGFMTW("Invalid state transition from %s to %s", stateToString(current_state_).c_str(), state.c_str());
@@ -68,6 +68,11 @@ bool HumanoidStateMachine::isValidTransition(State current, State next)
     default:
         return false;
     }
+}
+
+void HumanoidStateMachine::setPreviousState(State state) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    previous_state_ = state;
 }
 
 std::string HumanoidStateMachine::stateToString(State state)

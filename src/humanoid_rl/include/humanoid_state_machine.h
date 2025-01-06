@@ -14,6 +14,7 @@ public:
     void stateCallback(const std_msgs::String::ConstPtr &msg);
     State getCurrentState();
     State getPreviousState(); // new add：get previous state
+    void setPreviousState(State state); // new add：set previous state
     std::string stateToString(State state);
     
 private:

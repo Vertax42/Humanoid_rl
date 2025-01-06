@@ -41,7 +41,7 @@ std::vector<float> HumanoidPolicy::inference(const std::vector<float>& observati
         throw std::invalid_argument("Invalid observation size.");
     }
     // convert observation to tensor, add batch dimension
-    torch::Tensor input_tensor = torch::tensor(observation, torch::kFloat32).unsqueeze(0); // [1, obs_dim] [1, 93]
+    torch::Tensor input_tensor = torch::tensor(observation, torch::kFloat32).unsqueeze(0).contiguous(); // [1, obs_dim] [1, 93]
     // observation tensor preprocessing
     // ......TODO
     // get action tensor

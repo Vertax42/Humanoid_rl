@@ -256,7 +256,7 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
              vz * tmp1 - (x * vy - y * vx) * tmp2 + z * tmp3 };
 }
 
-std::vector<float> get_current_obs()
+std::vector<float> get_current_obs(std::vector<double> &init_pos)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
     std::vector<float> tmp_obs; // 93
@@ -276,6 +276,7 @@ std::vector<float> get_current_obs()
 
     {
         std::lock_guard<std::mutex> lock(data_mutex); // mutex lock
+        init_pos = measured_q_;
         q = measured_q_;
         v = measured_v_;
         tau = measured_tau_;
@@ -498,9 +499,16 @@ int main(int argc, char **argv)
     constexpr unsigned long MAXCYCLE = 720000; // 2 hours
     bool initFlag = false;
     std_msgs::Float64MultiArray control_msg;
+
+    // transition switch parameters
+    bool is_transitioning = false;
+    unsigned long transition_start_cycle = 0;
+    constexpr unsigned long transition_duration = 1500; // 3s（control frequency 100Hz）
+    std::vector<double> init_pos;
+    
     while(ros::ok())
     {   
-        static std::vector<double> init_pos;
+        static std::vector<double> default_pos;
         // reset the joint control parameters
         pos_des.resize(N_JOINTS);
         vel_des.resize(N_JOINTS);
@@ -516,7 +524,7 @@ int main(int argc, char **argv)
         LOGFMTI("Current state machine is: %s", state_machine.stateToString(current_state).c_str());
         // wait until measured_data are not empty
         try {
-            current_obs = get_current_obs();
+            current_obs = get_current_obs(init_pos);
             // get the current observation
         } catch(const std::runtime_error &e) {
             LOGE("ERROR in get_current_obs()!!");
@@ -525,7 +533,8 @@ int main(int argc, char **argv)
             continue; // jump out of the current loop
             // error in get_current_obs
         }
-        cycle_count++;
+        cycle_count++; // increase the cycle count
+        
         LOGFMTD("Current observation size: %lu", current_obs.size());
         if(initFlag && (current_obs[8] > -0.8)) // current_robot_state error
         {
@@ -548,7 +557,7 @@ int main(int argc, char **argv)
         }
 
         if(cycle_count <= startup_cycle && !initFlag) {
-            init_pos = measured_q_;
+            default_pos = measured_q_;
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
             LOGFMTI("In startup loop, time cycle: %ld", cycle_count);
@@ -559,7 +568,7 @@ int main(int argc, char **argv)
             double percentange = double(cycle_count - startup_cycle) / (init_cycle - startup_cycle);
             for(int i = 0; i < N_HAND_JOINTS; i++)
             {
-                pos_des[i] = init_pos[6 + i] + percentange * (0.0 - init_pos[6 + i]);
+                pos_des[i] = default_pos[6 + i] + percentange * (0.0 - default_pos[6 + i]);
                 vel_des[i] = 0.0;
                 kp[i] = 200.0;
                 kd[i] = 10.0;
@@ -568,7 +577,7 @@ int main(int argc, char **argv)
             // lower body init to damping mode
             for(int i = 0; i < N_LEG_JOINTS; i++)
             {
-                pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + percentange * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
+                pos_des[N_HAND_JOINTS + i] = default_pos[6 + N_HAND_JOINTS + i] + percentange * (0.0 - default_pos[6 + N_HAND_JOINTS + i]);
                 vel_des[N_HAND_JOINTS + i] = 0.0;
                 kp[N_HAND_JOINTS + i] = 300.0;
                 kd[N_HAND_JOINTS + i] = 10.0;
@@ -621,8 +630,49 @@ int main(int argc, char **argv)
                 case HumanoidStateMachine::ZERO_POS:
                     // ZERO_POS STATE LOGIC
                     LOGI("ZERO_POS state logic...");
-                    if(previous_state == HumanoidStateMachine::DAMPING) {
+                    if(previous_state == HumanoidStateMachine::DAMPING && !is_transitioning)
+                    {
+                        // start transition
+                        is_transitioning = true;
+                        transition_start_cycle = cycle_count;
+                        init_pos = measured_q_; // record the initial position of the transition
+                    }
+                    if(is_transitioning) {
+                        double percentage = double(cycle_count - transition_start_cycle) / transition_duration;
+                        if(percentage > 1.0)
+                        {
+                            percentage = 1.0;
+                            is_transitioning = false; // state transitioning down 
+
+                            // after switch state，set previous_state to ZERO_POS
+                            state_machine.setPreviousState(HumanoidStateMachine::ZERO_POS);
+                            LOGI("Transition to ZERO_POS completed. Previous state updated from DAMPING to ZERO_POS.");
+                        }
+                        // interpolate the joint position
+                        // upper body
                         for(int i = 0; i < N_HAND_JOINTS; i++) {
+                            pos_des[i] = init_pos[6 + i] * (1 - percentage);
+                            vel_des[i] = 0.0;
+                            kp[i] = 200.0;
+                            kd[i] = 10.0;
+                            torque[i] = 0.0;
+                        }
+                        // lower body
+                        for(int i = 0; i < N_LEG_JOINTS; i++) {
+                            pos_des[N_HAND_JOINTS + i] = pos_des[N_HAND_JOINTS + i]
+                                = init_pos[6 + N_HAND_JOINTS + i] * (1.0 - percentage);
+                            vel_des[N_HAND_JOINTS + i] = 0.0;
+                            kp[N_HAND_JOINTS + i] = 300.0;
+                            kd[N_HAND_JOINTS + i] = 10.0;
+                            torque[N_HAND_JOINTS + i] = 0.0;
+                        }
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        pub.publish(control_msg);
+                        LOGFMTW("Transitioning from DAMPING mode to ZERO_POS mode, percentage: %.2f", percentage);
+                        break;
+                    } else {
+                        for(int i = 0; i < N_HAND_JOINTS; i++)
+                        {
                             pos_des[i] = 0.0;
                             vel_des[i] = 0.0;
                             kp[i] = 200.0;
@@ -630,7 +680,8 @@ int main(int argc, char **argv)
                             torque[i] = 0.0;
                         }
                         // lower body init to damping mode
-                        for(int i = 0; i < N_LEG_JOINTS; i++) {
+                        for(int i = 0; i < N_LEG_JOINTS; i++)
+                        {
                             pos_des[N_HAND_JOINTS + i] = 0.0;
                             vel_des[N_HAND_JOINTS + i] = 0.0;
                             kp[N_HAND_JOINTS + i] = 300.0;
@@ -639,10 +690,8 @@ int main(int argc, char **argv)
                         }
                         control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
                         pub.publish(control_msg);
+                        LOGW("Normal ZERO_POS mode, keep sending zero position command.");
                         break;
-                    } else {
-                        LOGE("Unknown previous state!");
-                        ROS_WARN("Unknown previous state!");
                     }
                 case HumanoidStateMachine::STAND:
                     // STAND STATE LOGIC
