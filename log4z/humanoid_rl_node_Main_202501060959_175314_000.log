@@ -1,0 +1,13 @@
+2025-01-06 09:59:52.012 [175438] LOG_ALARM -----------------  log4z thread started!   ---------------------------- log4z.cpp:1886
+2025-01-06 09:59:52.012 [175438] LOG_ALARM logger id=0 key=Main name=Main path=./log4z/ level=1 display=true log4z.cpp:1892
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG ============================================================= utils_common.cpp:23
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG App name   : Humanoid Policy Inference utils_common.cpp:24
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG Build date : Jan  3 2025  09:49:20 utils_common.cpp:25
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG CPU infos  : 12th Gen Intel(R) Core(TM) i7-1260P utils_common.cpp:26
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG RAM infos  : 15.20GB Physical Memory 2.00GB Virtual Memory utils_common.cpp:27
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG OS  infos  : Linux 5.15.0-127-generic (x86_64) utils_common.cpp:28
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG Home dir   : /home/xbot/ utils_common.cpp:29
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG Current dir: /home/xbot/humanoid_rl/ utils_common.cpp:30
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG Date mow   : 2025/01/06 09:59:52 utils_common.cpp:31
+2025-01-06 09:59:52.062 [175314] LOG_DEBUG ============================================================= utils_common.cpp:32
+2025-01-06 09:59:55.076 [175314] LOG_INFO Loaded 30 joint configurations successed! humanoid_rl_inference.cpp:84

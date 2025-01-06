@@ -1,0 +1,6 @@
+2025-01-06 09:40:20.514 [110346] LOG_DEBUG q, v, tau vector size: 0, 0, 0 humanoid_rl_inference.cpp:289
+2025-01-06 09:40:20.514 [110346] LOG_ERROR Measured data (q, v, or tau) is empty. humanoid_rl_inference.cpp:290
+2025-01-06 09:40:20.514 [110346] LOG_ERROR Observation data not ready, return empty observation! humanoid_rl_inference.cpp:292
+2025-01-06 09:40:20.514 [110346] LOG_DEBUG Current observation size: 0 humanoid_rl_inference.cpp:526
+2025-01-06 09:40:36.042 [110346] LOG_INFO In startup loop, time cycle: 2 humanoid_rl_inference.cpp:552
+2025-01-06 09:40:36.042 [110346] LOG_INFO Current state machine is: DAMPING humanoid_rl_inference.cpp:515

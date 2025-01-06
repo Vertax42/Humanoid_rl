@@ -495,6 +495,7 @@ int main(int argc, char **argv)
     unsigned long cycle_count = 0;
     constexpr unsigned long startup_cycle = 100;
     constexpr unsigned long init_cycle = 500;
+    constexpr unsigned long MAXCYCLE = 720000; // 2 hours
     bool initFlag = false;
     std_msgs::Float64MultiArray control_msg;
     while(ros::ok())
@@ -520,9 +521,11 @@ int main(int argc, char **argv)
         } catch(const std::runtime_error &e) {
             LOGE("ERROR in get_current_obs()!!");
             std::this_thread::sleep_for(std::chrono::milliseconds(2)); // wait for 2 ms
+            ros::spinOnce();
             continue; // jump out of the current loop
             // error in get_current_obs
         }
+        cycle_count++;
         LOGFMTD("Current observation size: %lu", current_obs.size());
         if(initFlag && (current_obs[8] > -0.8)) // current_robot_state error
         {
@@ -548,13 +551,15 @@ int main(int argc, char **argv)
             init_pos = measured_q_;
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
-            cycle_count++;
+            LOGFMTI("In startup loop, time cycle: %ld", cycle_count);
+            ros::spinOnce();
             continue;
         } else if(cycle_count <= init_cycle && !initFlag) {
             // upper body init to damping mode
+            double percentange = double(cycle_count - startup_cycle) / (init_cycle - startup_cycle);
             for(int i = 0; i < N_HAND_JOINTS; i++)
             {
-                pos_des[i] = init_pos[6 + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + i]);
+                pos_des[i] = init_pos[6 + i] + percentange * (0.0 - init_pos[6 + i]);
                 vel_des[i] = 0.0;
                 kp[i] = 200.0;
                 kd[i] = 10.0;
@@ -563,7 +568,7 @@ int main(int argc, char **argv)
             // lower body init to damping mode
             for(int i = 0; i < N_LEG_JOINTS; i++)
             {
-                pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
+                pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + percentange * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
                 vel_des[N_HAND_JOINTS + i] = 0.0;
                 kp[N_HAND_JOINTS + i] = 300.0;
                 kd[N_HAND_JOINTS + i] = 10.0;
@@ -571,33 +576,40 @@ int main(int argc, char **argv)
             }
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
-            cycle_count++;
+            LOGFMTI("In init cycle loop, time cycle: %ld", cycle_count);
+            ros::spinOnce();
             continue;
         } else if(cycle_count > init_cycle && !initFlag) {
             initFlag = true;
             LOGFMTI("Initialization finished in %ld cycles!", cycle_count);
         }
 
+        if(cycle_count >= MAXCYCLE)
+        {
+            LOGE("Reach the max cycle number, ROS shutdown!");
+            ros::shutdown();
+            break;
+        }
+
         if(initFlag) {
             auto current_state = state_machine.getCurrentState(); // get the current state
+            auto previous_state = state_machine.getPreviousState(); // get the previous state
             switch(current_state) {
                 case HumanoidStateMachine::DAMPING:
                     // DAMPING STATE LOGIC
                     LOGI("DAMPING state logic...");
-                    break;
-                case HumanoidStateMachine::ZERO_POS:
-                    // ZERO_POS STATE LOGIC
-                    LOGI("ZERO_POS state logic...");
-                    for(int i = 0; i < N_HAND_JOINTS; i++) {
-                        pos_des[i] = init_pos[6 + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + i]);
+                    for(int i = 0; i < N_HAND_JOINTS; i++)
+                    {
+                        pos_des[i] = init_pos[6 + i];
                         vel_des[i] = 0.0;
                         kp[i] = 200.0;
                         kd[i] = 10.0;
                         torque[i] = 0.0;
                     }
                     // lower body init to damping mode
-                    for(int i = 0; i < N_LEG_JOINTS; i++) {
-                        pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + double(cycle_count - startup_cycle) / (init_cycle - startup_cycle) * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
+                    for(int i = 0; i < N_LEG_JOINTS; i++)
+                    {
+                        pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i];
                         vel_des[N_HAND_JOINTS + i] = 0.0;
                         kp[N_HAND_JOINTS + i] = 300.0;
                         kd[N_HAND_JOINTS + i] = 10.0;
@@ -606,6 +618,32 @@ int main(int argc, char **argv)
                     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
                     pub.publish(control_msg);
                     break;
+                case HumanoidStateMachine::ZERO_POS:
+                    // ZERO_POS STATE LOGIC
+                    LOGI("ZERO_POS state logic...");
+                    if(previous_state == HumanoidStateMachine::DAMPING) {
+                        for(int i = 0; i < N_HAND_JOINTS; i++) {
+                            pos_des[i] = 0.0;
+                            vel_des[i] = 0.0;
+                            kp[i] = 200.0;
+                            kd[i] = 10.0;
+                            torque[i] = 0.0;
+                        }
+                        // lower body init to damping mode
+                        for(int i = 0; i < N_LEG_JOINTS; i++) {
+                            pos_des[N_HAND_JOINTS + i] = 0.0;
+                            vel_des[N_HAND_JOINTS + i] = 0.0;
+                            kp[N_HAND_JOINTS + i] = 300.0;
+                            kd[N_HAND_JOINTS + i] = 10.0;
+                            torque[N_HAND_JOINTS + i] = 0.0;
+                        }
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        pub.publish(control_msg);
+                        break;
+                    } else {
+                        LOGE("Unknown previous state!");
+                        ROS_WARN("Unknown previous state!");
+                    }
                 case HumanoidStateMachine::STAND:
                     // STAND STATE LOGIC
                     LOGI("STAND state logic...");

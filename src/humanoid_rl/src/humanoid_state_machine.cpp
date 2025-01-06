@@ -1,8 +1,7 @@
 #include "humanoid_state_machine.h"
 #include "log4z.h"
 
-HumanoidStateMachine::HumanoidStateMachine(ros::NodeHandle &nh) : nh_(nh), current_state_(DAMPING)
-{
+HumanoidStateMachine::HumanoidStateMachine(ros::NodeHandle &nh) : nh_(nh), current_state_(DAMPING), previous_state_(DAMPING) {
     state_sub_ = nh_.subscribe("/robot_state", 1, &HumanoidStateMachine::stateCallback, this);
     LOGI("HumanoidStateMachine object is being created, subscribed to /robot_state topic.");
 }
@@ -34,8 +33,9 @@ void HumanoidStateMachine::stateCallback(const std_msgs::String::ConstPtr &msg)
     // 检查状态切换是否合法
     if(isValidTransition(current_state_, new_state))
     {
+        previous_state_ = current_state_;
         current_state_ = new_state;
-        LOGFMTI("State changed to: %s", state.c_str());
+        LOGFMTI("State changed from %s to: %s", previous_state_.c_str(), current_state_.c_str());
     } else
     {
         LOGFMTW("Invalid state transition from %s to %s", stateToString(current_state_).c_str(), state.c_str());
@@ -46,6 +46,11 @@ HumanoidStateMachine::State HumanoidStateMachine::getCurrentState()
 {
     std::lock_guard<std::mutex> lock(state_mutex_);
     return current_state_;
+}
+
+HumanoidStateMachine::State HumanoidStateMachine::getPreviousState() {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return previous_state_;
 }
 
 bool HumanoidStateMachine::isValidTransition(State current, State next)

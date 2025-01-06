@@ -1,0 +1,49 @@
+2025-01-06 09:39:07.650 [110452] LOG_ALARM -----------------  log4z thread started!   ---------------------------- log4z.cpp:1886
+2025-01-06 09:39:07.650 [110452] LOG_ALARM logger id=0 key=Main name=Main path=./log4z/ level=1 display=true log4z.cpp:1892
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG ============================================================= utils_common.cpp:23
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG App name   : Humanoid Policy Inference utils_common.cpp:24
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG Build date : Jan  3 2025  09:49:20 utils_common.cpp:25
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG CPU infos  : 12th Gen Intel(R) Core(TM) i7-1260P utils_common.cpp:26
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG RAM infos  : 15.20GB Physical Memory 2.00GB Virtual Memory utils_common.cpp:27
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG OS  infos  : Linux 5.15.0-127-generic (x86_64) utils_common.cpp:28
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG Home dir   : /home/xbot/ utils_common.cpp:29
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG Current dir: /home/xbot/humanoid_rl/ utils_common.cpp:30
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG Date mow   : 2025/01/06 09:39:07 utils_common.cpp:31
+2025-01-06 09:39:07.701 [110346] LOG_DEBUG ============================================================= utils_common.cpp:32
+2025-01-06 09:39:10.719 [110346] LOG_INFO Loaded 30 joint configurations successed! humanoid_rl_inference.cpp:84
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG ============================================================= humanoid_rl_inference.cpp:106
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG Loaded model configuration: humanoid_rl_inference.cpp:107
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG   model_path: /home/xbot/policy_test.pt humanoid_rl_inference.cpp:108
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG   obs_dim: 93 humanoid_rl_inference.cpp:109
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG   action_dim: 27 humanoid_rl_inference.cpp:110
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG   history_length: 15 humanoid_rl_inference.cpp:111
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG   obs_history_length: 5 humanoid_rl_inference.cpp:112
+2025-01-06 09:39:10.722 [110346] LOG_DEBUG ============================================================= humanoid_rl_inference.cpp:113
+2025-01-06 09:39:10.723 [110346] LOG_INFO HumanoidStateMachine object is being created, subscribed to /robot_state topic. humanoid_state_machine.cpp:7
+2025-01-06 09:39:10.738 [110346] LOG_INFO ============================================================= humanoid_policy.cpp:20
+2025-01-06 09:39:10.738 [110346] LOG_INFO HumanoidPolicy object is being created. humanoid_policy.cpp:21
+2025-01-06 09:39:10.738 [110346] LOG_INFO Model path: /home/xbot/policy_test.pt humanoid_policy.cpp:22
+2025-01-06 09:39:10.738 [110346] LOG_INFO Observation dimension: 93 humanoid_policy.cpp:23
+2025-01-06 09:39:10.738 [110346] LOG_INFO Action dimension: 27 humanoid_policy.cpp:24
+2025-01-06 09:39:10.738 [110346] LOG_INFO History length: 15 humanoid_policy.cpp:25
+2025-01-06 09:39:10.738 [110346] LOG_INFO Observation history length: 5 humanoid_policy.cpp:26
+2025-01-06 09:39:10.738 [110346] LOG_INFO ============================================================= humanoid_policy.cpp:27
+2025-01-06 09:39:10.738 [110346] LOG_INFO Model has 48539 parameters. humanoid_policy.cpp:123
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG ============================================================= humanoid_policy.cpp:92
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.0.weight, Shape: [128, 93] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.0.bias, Shape: [128] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.2.weight, Shape: [128, 128] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.2.bias, Shape: [128] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.4.weight, Shape: [128, 128] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.4.bias, Shape: [128] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.6.weight, Shape: [27, 128] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Layer: actor.6.bias, Shape: [27] humanoid_policy.cpp:109
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG ============================================================= humanoid_policy.cpp:115
+2025-01-06 09:39:10.738 [110346] LOG_INFO Total layers: 8 humanoid_policy.cpp:116
+2025-01-06 09:39:10.738 [110346] LOG_INFO Current state machine is: DAMPING humanoid_rl_inference.cpp:515
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG q, v, tau vector size: 0, 0, 0 humanoid_rl_inference.cpp:289
+2025-01-06 09:39:10.738 [110346] LOG_ERROR Measured data (q, v, or tau) is empty. humanoid_rl_inference.cpp:290
+2025-01-06 09:39:10.738 [110346] LOG_ERROR Observation data not ready, return empty observation! humanoid_rl_inference.cpp:292
+2025-01-06 09:39:10.738 [110346] LOG_DEBUG Current observation size: 0 humanoid_rl_inference.cpp:526
+2025-01-06 09:40:20.514 [110346] LOG_INFO In startup loop, time cycle: 1 humanoid_rl_inference.cpp:552
+2025-01-06 09:40:20.514 [110346] LOG_INFO Current state machine is: DAMPING humanoid_rl_inference.cpp:515

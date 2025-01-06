@@ -13,6 +13,7 @@ public:
     HumanoidStateMachine(ros::NodeHandle &nh);
     void stateCallback(const std_msgs::String::ConstPtr &msg);
     State getCurrentState();
+    State getPreviousState(); // new add：get previous state
     std::string stateToString(State state);
     
 private:
@@ -21,6 +22,7 @@ private:
     ros::NodeHandle &nh_;
     ros::Subscriber state_sub_;
     State current_state_;
+    State previous_state_;  // new add：record previous state
     std::mutex state_mutex_;
 };
 
