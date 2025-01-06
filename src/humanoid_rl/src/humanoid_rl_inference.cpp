@@ -505,7 +505,7 @@ int main(int argc, char **argv)
     unsigned long transition_start_cycle = 0;
     constexpr unsigned long transition_duration = 1500; // 3s（control frequency 100Hz）
     std::vector<double> init_pos;
-    
+    std::vector<double> stand_pos;
     while(ros::ok())
     {   
         static std::vector<double> default_pos;
@@ -535,7 +535,7 @@ int main(int argc, char **argv)
         }
         cycle_count++; // increase the cycle count
         
-        LOGFMTD("Current observation size: %lu", current_obs.size());
+        // LOGFMTD("Current observation size: %lu", current_obs.size());
         if(initFlag && (current_obs[8] > -0.8)) // current_robot_state error
         {
             LOGE("Robot state error: send joint command as shown below:");
@@ -696,16 +696,60 @@ int main(int argc, char **argv)
                 case HumanoidStateMachine::STAND:
                     // STAND STATE LOGIC
                     LOGI("STAND state logic...");
+                    if(previous_state == HumanoidStateMachine::ZERO_POS)
+                    {
+                        stand_pos = measured_q_; // record the initial position of the transition
+                        state_machine.setPreviousState(HumanoidStateMachine::STAND);
+                    }
+                    for(int i = 0; i < N_HAND_JOINTS; i++)
+                    {
+                        pos_des[i] = stand_pos[6 + i];
+                        vel_des[i] = 0.0;
+                        kp[i] = 200.0;
+                        kd[i] = 10.0;
+                        torque[i] = 0.0;
+                    }
+                    // lower body init to damping mode
+                    for(int i = 0; i < N_LEG_JOINTS; i++)
+                    {
+                        pos_des[N_HAND_JOINTS + i] = stand_pos[6 + N_HAND_JOINTS + i];
+                        vel_des[N_HAND_JOINTS + i] = 0.0;
+                        kp[N_HAND_JOINTS + i] = 300.0;
+                        kd[N_HAND_JOINTS + i] = 10.0;
+                        torque[N_HAND_JOINTS + i] = 0.0;
+                    }
+                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                    pub.publish(control_msg);
                     break;
                 case HumanoidStateMachine::WALK:
                     // WALK STATE LOGIC
                     LOGI("WALK state logic...");
                     // How to get current_obs
                     action = policy.inference(current_obs); // action is a vector of float 27 dim
-                    for(long unsigned int i = 0; i < action.size(); i++)
+                    // for(long unsigned int i = 0; i < action.size(); i++)
+                    // {
+                    //     LOGFMTD("Action[%lu]: %f", i, action[i]);
+                    // }
+                    for(int i = 0; i < N_HAND_JOINTS; i++)
                     {
-                        LOGFMTD("Action[%lu]: %f", i, action[i]);
+                        pos_des[i] = 0.3 * action[i];
+                        vel_des[i] = 0.0;
+                        kp[i] = 300.0;
+                        kd[i] = 20.0;
+                        torque[i] = 0.0;
                     }
+                    // lower body init to damping mode
+                    for(int i = 0; i < N_LEG_JOINTS; i++)
+                    {
+                        pos_des[N_HAND_JOINTS + i] = stand_pos[6 + N_HAND_JOINTS + i];
+                        vel_des[N_HAND_JOINTS + i] = 0.0;
+                        kp[N_HAND_JOINTS + i] = 300.0;
+                        kd[N_HAND_JOINTS + i] = 10.0;
+                        torque[N_HAND_JOINTS + i] = 0.0;
+                    }
+                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                    pub.publish(control_msg);
+                    LOGW("WALK mode, keep sending policy output command.");
                     break;
                 default:
                     LOGE("Unknown state!");
@@ -719,7 +763,9 @@ int main(int argc, char **argv)
             LOGFMTW("Inference time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
         auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
         int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
-        LOGFMTW("Sleep time: %d us", sleep_time);
+        // LOGFMTW("Sleep time: %d us", sleep_time);
+        duration = std::chrono::steady_clock::now() - start_time;
+        LOGFMTA("Cycle process time: %ld ms", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
         std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
         ros::spinOnce();
     }
