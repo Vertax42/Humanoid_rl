@@ -15,7 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
 )
 
-find_package(Torch REQUIRED HINTS "/home/xbot/libtorch")
+find_package(Torch REQUIRED HINTS "/home/vertax/libtorch")
 find_package(Eigen3 REQUIRED)
 # Catkin-specific configuration
 catkin_package(

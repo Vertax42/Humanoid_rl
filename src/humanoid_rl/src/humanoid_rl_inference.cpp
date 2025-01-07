@@ -730,7 +730,6 @@ int main(int argc, char **argv)
                     for(size_t i = 0; i < action.size(); i++)
                     {
                         action[i] = std::min(MAX_CLIP, std::max(MIN_CLIP, action[i]));
-                        LOGFMTD("CLIPED Action[%ld]: %f", i, action[i]);
                     }
                     // std::vector<size_t> upperbody_skip_indices = { 7, 8, 17 };
                     action.insert(action.begin() + 17, 0); // 在位置17插入0 WAIST_ROLL_JOINT
@@ -740,6 +739,7 @@ int main(int argc, char **argv)
                     for(int i = 0; i < N_HAND_JOINTS; i++)
                     {
                         pos_des[i] = 0.3 * action[i];
+                        LOGFMTD("Cliped and scaled Action[%ld]: %f", i, pos_des[i]);
                         vel_des[i] = 0.0;
                         kp[i] = 300.0;
                         kd[i] = 20.0;
@@ -754,6 +754,7 @@ int main(int argc, char **argv)
                     for(int i = 0; i < N_LEG_JOINTS; i++)
                     {
                         pos_des[N_HAND_JOINTS + i] = 0.3 * action[N_HAND_JOINTS + i];
+                        LOGFMTD("Cliped and scaled Action[%ld]: %f", N_HAND_JOINTS + i, pos_des[N_HAND_JOINTS + i]);
                         vel_des[N_HAND_JOINTS + i] = 0.0;
                         kp[N_HAND_JOINTS + i] = 200.0;
                         kd[N_HAND_JOINTS + i] = 10.0;
@@ -779,7 +780,7 @@ int main(int argc, char **argv)
                     {
                         LOGFMTD("Control_msg[%lu]: %f", i, control_msg.data[i]);
                     }
-                    pub.publish(control_msg);
+                    // pub.publish(control_msg);
                     LOGW("WALK mode, keep sending policy output command.");
                     break;
                 default:
