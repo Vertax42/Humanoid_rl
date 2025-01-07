@@ -5,6 +5,7 @@
 #include "log4z.h"
 #include "utils_logger.hpp"
 #include "version.h"
+#include <algorithm>
 #include <chrono>
 #include <fcntl.h>
 #include <mutex>
@@ -726,10 +727,16 @@ int main(int argc, char **argv)
                     LOGI("WALK state logic...");
                     // How to get current_obs
                     action = policy.inference(current_obs); // action is a vector of float 27 dim
-                    // for(long unsigned int i = 0; i < action.size(); i++)
-                    // {
-                    //     LOGFMTD("Action[%lu]: %f", i, action[i]);
-                    // }
+                    for(size_t i = 0; i < action.size(); i++)
+                    {
+                        action[i] = std::min(MAX_CLIP, std::max(MIN_CLIP, action[i]));
+                        LOGFMTD("CLIPED Action[%ld]: %f", i, action[i]);
+                    }
+                    // std::vector<size_t> upperbody_skip_indices = { 7, 8, 17 };
+                    action.insert(action.begin() + 17, 0); // 在位置17插入0 WAIST_ROLL_JOINT
+                    action.insert(action.begin() + 8, 0);  // 在位置8插入0 NECK_PITCH_JOINT
+                    action.insert(action.begin() + 7, 0);  // 在位置7插入0 NECK_YAW_JOINT
+
                     for(int i = 0; i < N_HAND_JOINTS; i++)
                     {
                         pos_des[i] = 0.3 * action[i];
@@ -737,17 +744,41 @@ int main(int argc, char **argv)
                         kp[i] = 300.0;
                         kd[i] = 20.0;
                         torque[i] = 0.0;
+                        if(i == 16 || i == 17)
+                        {
+                            kp[i] = 200.0; 
+                            kd[i] = 40.0;
+                        }
                     }
                     // lower body init to damping mode
                     for(int i = 0; i < N_LEG_JOINTS; i++)
                     {
-                        pos_des[N_HAND_JOINTS + i] = stand_pos[6 + N_HAND_JOINTS + i];
+                        pos_des[N_HAND_JOINTS + i] = 0.3 * action[N_HAND_JOINTS + i];
                         vel_des[N_HAND_JOINTS + i] = 0.0;
-                        kp[N_HAND_JOINTS + i] = 300.0;
+                        kp[N_HAND_JOINTS + i] = 200.0;
                         kd[N_HAND_JOINTS + i] = 10.0;
                         torque[N_HAND_JOINTS + i] = 0.0;
                     }
+                    // left_leg_pitch_joint && right_leg_pitch_joint
+                    for(int i :{20 ,26})
+                    {
+                        kp[i] = 350.0;
+                    }
+                    // left_knee_joint && right_knee_joint
+                    for(int i :{21, 27})
+                    {
+                        kp[i] = 350.0;
+                    }
+                    // foot ankle joints
+                    for(int i :{22, 23, 28, 29})
+                    {
+                        kp[i] = 15.0;
+                    }
                     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                    for(size_t i = 0; i < control_msg.data.size(); i++)
+                    {
+                        LOGFMTD("Control_msg[%lu]: %f", i, control_msg.data[i]);
+                    }
                     pub.publish(control_msg);
                     LOGW("WALK mode, keep sending policy output command.");
                     break;
@@ -765,7 +796,7 @@ int main(int argc, char **argv)
         int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
         // LOGFMTW("Sleep time: %d us", sleep_time);
         duration = std::chrono::steady_clock::now() - start_time;
-        LOGFMTA("Cycle process time: %ld ms", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+        LOGFMTA("Cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
         std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
         ros::spinOnce();
     }

@@ -3,15 +3,15 @@ default_joints:
     name: left_shoulder_pitch_joint
     pos_des: 0.0
     vel_des: 0.0
-    kp: 100.0
-    kd: 10.0
+    kp: 300.0
+    kd: 20.0
     torque: 5.0
   - index: 1
     name: left_shoulder_roll_joint
     pos_des: 0.5
     vel_des: 0.1
-    kp: 150.0
-    kd: 15.0
+    kp: 300.0
+    kd: 20.0
     torque: 6.0
   - index: 2
     name: left_arm_yaw_joint
@@ -116,7 +116,7 @@ default_joints:
     pos_des: -0.5
     vel_des: -0.1
     kp: 200.0
-    kd: 20.0
+    kd: 40.0
     torque: 7.0
   - index: 17
     name: waist_roll_joint # WAIST_ROLL_JOINT
@@ -143,29 +143,29 @@ default_joints:
     name: left_leg_pitch_joint # LEFT_LEG_PITCH_JOINT
     pos_des: -0.5
     vel_des: -0.1
-    kp: 200.0
+    kp: 350.0
     kd: 20.0
     torque: 7.0
   - index: 21
     name: left_knee_joint # LEFT_KNEE_JOINT
     pos_des: 0.0
     vel_des: 0.0
-    kp: 100.0
+    kp: 350.0
     kd: 10.0
     torque: 5.0
   - index: 22
     name: left_ankle_pitch_joint # LEFT_ANKLE_PITCH_JOINT
     pos_des: 0.5
     vel_des: 0.1
-    kp: 150.0
-    kd: 15.0
+    kp: 15.0
+    kd: 10.0
     torque: 6.0
   - index: 23
     name: left_ankle_roll_joint # LEFT_ANKLE_ROLL_JOINT
     pos_des: -0.5
     vel_des: -0.1
-    kp: 200.0
-    kd: 20.0
+    kp: 15.0
+    kd: 10.0
     torque: 7.0
   - index: 24
     name: right_leg_roll_joint # RIGHT_LEG_ROLL_JOINT
@@ -185,27 +185,27 @@ default_joints:
     name: right_leg_pitch_joint # RIGHT_LEG_PITCH_JOINT
     pos_des: -0.5
     vel_des: -0.1
-    kp: 200.0
+    kp: 300.0
     kd: 20.0
     torque: 7.0
   - index: 27
     name: right_knee_joint # RIGHT_KNEE_JOINT
     pos_des: 0.0
     vel_des: 0.0
-    kp: 100.0
+    kp: 350.0
     kd: 10.0
     torque: 5.0
   - index: 28
     name: right_ankle_pitch_joint # RIGHT_ANKLE_PITCH_JOINT
     pos_des: 0.5
     vel_des: 0.1
-    kp: 150.0
-    kd: 15.0
+    kp: 15.0
+    kd: 10.0
     torque: 6.0
   - index: 29
     name: right_ankle_roll_joint # RIGHT_ANKLE_ROLL_JOINT
     pos_des: -0.5
     vel_des: -0.1
-    kp: 200.0
-    kd: 20.0
+    kp: 15.0
+    kd: 10.0
     torque: 7.0
