@@ -79,6 +79,8 @@ bool loadJointConfigs(ros::NodeHandle &nh, const std::string &param_name, std::v
         config.kp = static_cast<double>(joint["kp"]);
         config.kd = static_cast<double>(joint["kd"]);
         config.torque = static_cast<double>(joint["torque"]);
+        config.upper_limit = static_cast<double>(joint["upper_limit"]);
+        config.lower_limit = static_cast<double>(joint["lower_limit"]);
         default_joints.push_back(config);
     }
 
@@ -738,8 +740,21 @@ int main(int argc, char **argv)
 
                     for(int i = 0; i < N_HAND_JOINTS; i++)
                     {
-                        pos_des[i] = 0.3 * action[i];
-                        LOGFMTD("Cliped and scaled Action[%ld]: %f", i, pos_des[i]);
+                        // get the joint limits from the default_joints config
+                        double upper_limit = default_joints[i].upper_limit;
+                        double lower_limit = default_joints[i].lower_limit;
+                        
+                        // scale the action by 0.3 factor
+                        double raw_des_pos = 0.3 * action[i];
+
+                        // check if the raw_des_pos is out of bounds and 
+                        if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
+                            LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", i, default_joints[i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
+                        }
+                        // clip the raw_des_pos to the joint limits
+                        pos_des[i] = clip(raw_des_pos, lower_limit, upper_limit);
+                        LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", i, pos_des[i], lower_limit, upper_limit);
+
                         vel_des[i] = 0.0;
                         kp[i] = 300.0;
                         kd[i] = 20.0;
@@ -753,8 +768,18 @@ int main(int argc, char **argv)
                     // lower body init to damping mode
                     for(int i = 0; i < N_LEG_JOINTS; i++)
                     {
-                        pos_des[N_HAND_JOINTS + i] = 0.3 * action[N_HAND_JOINTS + i];
-                        LOGFMTD("Cliped and scaled Action[%ld]: %f", N_HAND_JOINTS + i, pos_des[N_HAND_JOINTS + i]);
+                        // get the joint limits from the default_joints config
+                        double upper_limit = default_joints[N_HAND_JOINTS + i].upper_limit;
+                        double lower_limit = default_joints[N_HAND_JOINTS + i].lower_limit;
+                        // scale the action by 0.3 factor
+                        double raw_des_pos = 0.3 * action[N_HAND_JOINTS + i];
+                        // check if the raw_des_pos is out of bounds and
+                        if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
+                            LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", N_HAND_JOINTS + i, default_joints[N_HAND_JOINTS + i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
+                        }
+                        // clip the raw_des_pos to the joint limits
+                        pos_des[N_HAND_JOINTS + i] = clip(raw_des_pos, lower_limit, upper_limit);
+                        LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", N_HAND_JOINTS + i, pos_des[N_HAND_JOINTS + i], lower_limit, upper_limit);
                         vel_des[N_HAND_JOINTS + i] = 0.0;
                         kp[N_HAND_JOINTS + i] = 200.0;
                         kd[N_HAND_JOINTS + i] = 10.0;
