@@ -1,6 +1,6 @@
 <launch>
     <!-- 定义参数 -->
-    <arg name="handless" default="false"/>
+    <arg name="handless" default="true"/>
 
     <!-- 加载 jointconfig.yaml 文件到参数服务器 -->
     <rosparam command="load" file="$(find humanoid_rl)/config/joint_config.yaml" />

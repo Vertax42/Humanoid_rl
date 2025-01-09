@@ -17,6 +17,8 @@ struct JointConfig {
     double kp;
     double kd;
     double torque;
+    double upper_limit;
+    double lower_limit;
 };
 
 struct ModelConfig {
