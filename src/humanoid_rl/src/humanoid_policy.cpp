@@ -14,8 +14,9 @@ HumanoidPolicy::HumanoidPolicy(const std::string& model_path, int obs_dim, int a
     if (_obs_dim <= 0 || _action_dim <= 0 || _history_length <= 0) {
         throw std::invalid_argument("Invalid dimensions or history length provided.");
     }
-    // initialize history
+    // initialize history && last_action
     _obs_history.resize(_history_length);
+    _last_action.resize(_action_dim, 0.0f);
     // logInfo && print parameters
     LOGI("=============================================================");
     LOGFMTI("HumanoidPolicy object is being created.");

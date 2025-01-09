@@ -55,7 +55,7 @@ EulerAngle QuaternionToEuler(const Quaternion &q);
 
 std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, const std::array<double, 3> &vel);
 
-std::vector<float> get_current_obs(std::vector<double> &init_pos);
+std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action);
 
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg);
 

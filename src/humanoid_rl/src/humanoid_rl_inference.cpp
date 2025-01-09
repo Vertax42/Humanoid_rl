@@ -257,7 +257,7 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
              vz * tmp1 - (x * vy - y * vx) * tmp2 + z * tmp3 };
 }
 
-std::vector<float> get_current_obs(std::vector<double> &init_pos)
+std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
     std::vector<float> tmp_obs; // 93
@@ -366,11 +366,8 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos)
         }
         tmp_obs.push_back(v[i]);
     }
-    for (size_t i = 0; i < tau.size(); i++) {
-        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
-            continue; // 跳过当前元素
-        }
-        tmp_obs.push_back(tau[i]);
+    for (size_t i = 0; i < last_action.size(); i++) {
+        tmp_obs.push_back(last_action[i]);
     }
     // for(auto i : q) // [39]
     // {
@@ -493,7 +490,9 @@ int main(int argc, char **argv)
     std::thread inputThread(handleInput, config.lin_sensitivity, config.ang_sensitivity);
     std::vector<double> pos_des, vel_des, kp, kd, torque; // configure for the joint control parameters
     std::vector<float> current_obs; // current observation
-    std::vector<float> action;
+    std::vector<float> last_action(27, 0.0f);
+    std::vector<float> action(27, 0.0f);
+
     unsigned long cycle_count = 0;
     constexpr unsigned long startup_cycle = 100;
     constexpr unsigned long init_cycle = 500;
@@ -524,8 +523,9 @@ int main(int argc, char **argv)
         auto current_state = state_machine.getCurrentState(); // get the current state
         LOGFMTI("Current state machine is: %s", state_machine.stateToString(current_state).c_str());
         // wait until measured_data are not empty
+        last_action = policy.get_LastAction(); // get the last action
         try {
-            current_obs = get_current_obs(init_pos);
+            current_obs = get_current_obs(init_pos, last_action);
             // get the current observation
         } catch(const std::runtime_error &e) {
             LOGE("ERROR in get_current_obs()!!");
@@ -779,7 +779,7 @@ int main(int argc, char **argv)
                     {
                         LOGFMTD("Control_msg[%lu]: %f", i, control_msg.data[i]);
                     }
-                    pub.publish(control_msg);
+                    // pub.publish(control_msg);
                     LOGW("WALK mode, keep sending policy output command.");
                     break;
                 default:
