@@ -1,6 +1,6 @@
 #include "humanoid_rl_inference.h"
 #include "body_control.h"
-#include "humanoid_policy.h"
+// #include "humanoid_policy.h"
 #include "humanoid_state_machine.h"
 #include "log4z.h"
 #include "utils_logger.hpp"
@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <mutex>
 #include <ros/ros.h>
 #include <termios.h>
@@ -394,6 +395,147 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     return tmp_obs;
 }
 
+std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action, HumanoidPolicy &policy)
+{
+    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
+    std::vector<float> tmp_obs; // 47 * 15 = 705
+    Command local_cmd;
+    {
+        std::lock_guard<std::mutex> cmd_lock(cmd_mutex);
+        local_cmd = user_cmd; // Copy the shared command to a local variable
+    }
+
+    // create tmp current data copy 7: neck_yaw_joint, 8: neck_pitch_joint, 17: waist_roll_joint
+    std::vector<double> q, tmp_q;     // 30
+    std::vector<double> v, tmp_v;     // 30
+    std::vector<double> tau, tmp_tau; // 30
+    std::array<double, 4> quat;
+    std::array<double, 3> angular_vel;
+    std::array<double, 3> accel;
+
+    {
+        std::lock_guard<std::mutex> lock(data_mutex); // mutex lock
+        init_pos = measured_q_;
+        q = measured_q_;
+        v = measured_v_;
+        tau = measured_tau_;
+        quat = quat_est;
+        angular_vel = angular_vel_local;
+        accel = imu_accel;
+    }
+
+    if(q.empty() || v.empty() || tau.empty()) // check if the measured data is empty
+    {
+        LOGFMTD("q, v, tau vector size: %ld, %ld, %ld", q.size(), v.size(), v.size());
+        LOGE("Measured data (q, v, or tau) is empty.");
+        // throw std::runtime_error("Measured data (q, v, or tau) is empty.");
+        LOGE("Observation data not ready, return empty observation!");
+        return std::vector<float>();
+    }
+
+    if(quat[0] == 0.0 && quat[1] == 0.0 && quat[2] == 0.0 && quat[3] == 0.0) // check if the quaternion is all zeros
+    {
+        throw std::runtime_error("Invalid quaternion (all zeros).");
+        LOGE("Invalid quaternion (all zeros).");
+    }
+
+    EulerAngle euler
+        = QuaternionToEuler(Quaternion{ quat[0], quat[1], quat[2], quat[3] }); // convert quaternion to euler angle
+    if(std::isnan(euler.yaw))                                                  // check if the yaw angle is NaN
+    {
+        throw std::runtime_error("Invalid yaw angle (NaN).");
+        LOGE("Invalid yaw angle (NaN).");
+    }
+    double current_yaw = euler.yaw * -1.0; // current yaw angle
+
+    hist_yaw.push_back(current_yaw);                // push back the current yaw angle
+    if(hist_yaw.size() >= 30) hist_yaw.pop_front(); // pop the front element if the size is greater than 10
+    double base_yaw = std::accumulate(hist_yaw.begin(), hist_yaw.end(), 0.0)
+                      / hist_yaw.size(); // calculate the average yaw angle as the base yaw angle
+    double target_yaw_angular
+        = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
+
+    LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
+    std::array<double, 3> proj_grav = quat_rotate_inverse(quat_est, gravity);
+    proj_grav[0] *= -1.;
+
+    
+    // 1. command input 2D (sin_pos, cos_pos) + 3D command [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
+    // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
+    // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
+    // 4. input commands [vx, vy, vyaw, ----vheading], [3], 12 # user_cmd.x, user_cmd.y, user_cmd.yaw, user_cmd.heading
+    // 5. joint rel position [q1, q2, ..., q30], [27], 39 # default_joints_pos set to 0 Unoise(n_min=-0.01,
+    // n_max=0.01)
+    // 6. joint rel velocity [v1, v2, ..., v30], [27], 66 # default_joints_vel set to 0 Unoise(n_min=-1.5, n_max=1.5)
+    // 7. last_action [a1, a2, ..., a27], [27], 93 # Unoise(n_min=-0.1, n_max=0.1)
+    // now we do not use the headding observation so the obs_dim is 93
+
+    for(int i = 0; i < 3; i++) // [3]
+    {
+        tmp_obs.push_back(accel[i] * (i == 0 ? 1 : -1));
+        LOGFMTD("base linear velocity[%d]: %f", i, accel[i]);
+    }
+
+    for(int i = 0; i < 3; i++) // [6]
+    {
+        tmp_obs.push_back(angular_vel[i] * (i == 0 ? 1 : -1));
+        LOGFMTD("base angular velocity[%d]: %f", i, angular_vel[i]);
+    }
+
+    for(int i = 0; i < 3; i++) // [9]
+    {
+        tmp_obs.push_back(proj_grav[i]);
+        LOGFMTD("base projected gravity[%d]: %f", i, proj_grav[i]);
+    }
+
+    tmp_obs.push_back(local_cmd.x);        // [10]
+    tmp_obs.push_back(local_cmd.y);        // [11]
+    tmp_obs.push_back(target_yaw_angular); // [12]
+    LOGFMTD("input_cmd.x: %f, input_cmd.y: %f, input_yaw_angular: %f", local_cmd.x, local_cmd.y, target_yaw_angular);
+    std::vector<size_t> skip_indices = { 0, 1, 2, 3, 4, 5, 7 + 6, 8 + 6, 17 + 6 };
+    for(size_t i = 0; i < q.size(); i++)
+    {
+        if(std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end())
+        {
+            continue; // 跳过当前元素
+        }
+        tmp_obs.push_back(q[i]);
+    }
+    for(size_t i = 0; i < v.size(); i++)
+    {
+        if(std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end())
+        {
+            continue; // 跳过当前元素
+        }
+        tmp_obs.push_back(v[i]);
+    }
+    for(size_t i = 0; i < last_action.size(); i++)
+    {
+        tmp_obs.push_back(last_action[i]);
+    }
+    // for(auto i : q) // [39]
+    // {
+    //     tmp_obs.push_back(i);
+    //     // LOGFMTD("joint position: %f", i);
+    // }
+    // LOGFMTD("obs_q's size: %ld", q.size());
+    // for(auto i : v) // [66]
+    // {
+    //     tmp_obs.push_back(i);
+    //     // LOGFMTD("joint velocity: %f", i);
+    // }
+    // LOGFMTD("obs_v's size: %ld", v.size());
+    // for(auto i : tau) // [93]
+    // {
+    //     tmp_obs.push_back(i);
+    //     // LOGFMTD("joint torque: %f", i);
+    // }
+    LOGFMTD("tmp_obs's final size: %ld", tmp_obs.size());
+    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
+
+    return tmp_obs;
+}
+
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
@@ -477,6 +619,13 @@ int main(int argc, char **argv)
     ModelConfig config;
     if(loadModelConfig(nh, config))
     {
+        // decode $(env HOME)
+        size_t env_pos = config.model_path.find("$(env HOME)");
+        if(env_pos != std::string::npos)
+        {
+            const char *home_dir = getenv("HOME");
+            config.model_path.replace(env_pos, 11, home_dir); // 11 是 "$(env HOME)" 的长度
+        }
         printModelConfig(config);
     } else
     {
@@ -487,6 +636,7 @@ int main(int argc, char **argv)
     HumanoidStateMachine state_machine(nh);
     // humanoid policy class
     // model_path, obs_dim, action_dim, history_length, obs_history_length
+    
     HumanoidPolicy policy(config.model_path, config.obs_dim, config.action_dim, config.history_length, config.obs_history_length);
 
     std::thread inputThread(handleInput, config.lin_sensitivity, config.ang_sensitivity);

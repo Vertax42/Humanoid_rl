@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <std_msgs/Float64MultiArray.h>
+#include "humanoid_policy.h"
 
 
 struct JointConfig {
@@ -59,8 +60,7 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
 
 std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action);
 
-std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action,
-                                   HumanoidPolicy &policy);
+std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action, HumanoidPolicy &policy);
 
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg);
 
