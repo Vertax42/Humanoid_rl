@@ -59,6 +59,9 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
 
 std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action);
 
+std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action,
+                                   HumanoidPolicy &policy);
+
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg);
 
 #endif // HUMANOID_RL_INFERENCE_H

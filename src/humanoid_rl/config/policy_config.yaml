@@ -1,4 +1,4 @@
-model_path: "/home/vertax/policy_test.pt" # model path
+model_path: "/home/xbot/policy_test.pt" # model path
 obs_dim: 93 # dimensions of observation space
 action_dim: 27 # dimensions of action space
 history_length: 15 # length of history frames

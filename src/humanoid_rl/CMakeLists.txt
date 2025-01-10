@@ -15,7 +15,8 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
 )
 
-find_package(Torch REQUIRED HINTS "/home/vertax/libtorch")
+set(HOME_DIR $ENV{HOME})
+find_package(Torch REQUIRED HINTS "${HOME_DIR}/libtorch")
 find_package(Eigen3 REQUIRED)
 # Catkin-specific configuration
 catkin_package(

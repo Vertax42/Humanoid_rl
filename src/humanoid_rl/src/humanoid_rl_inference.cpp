@@ -317,13 +317,13 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     double base_yaw = std::accumulate(hist_yaw.begin(), hist_yaw.end(), 0.0) / hist_yaw.size(); // calculate the average yaw angle as the base yaw angle
     double target_yaw_angular
         = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
-                                                                                   // velocity index of joints to remove
+
     LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
     std::array<double, 3> proj_grav = quat_rotate_inverse(quat_est, gravity);
     proj_grav[0] *= -1.;
 
     // use std::remove_if and lambda to remove elements
-    // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
+    //// 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
     // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
     // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
     // 4. input commands [vx, vy, vyaw, ----vheading], [3], 12 # user_cmd.x, user_cmd.y, user_cmd.yaw, user_cmd.heading
@@ -505,7 +505,7 @@ int main(int argc, char **argv)
     // transition switch parameters
     bool is_transitioning = false;
     unsigned long transition_start_cycle = 0;
-    constexpr unsigned long transition_duration = 1500; // 3s（control frequency 100Hz）
+    constexpr unsigned long transition_duration = 1500; // 15s（control frequency 100Hz）
     std::vector<double> init_pos;
     std::vector<double> stand_pos;
     while(ros::ok())

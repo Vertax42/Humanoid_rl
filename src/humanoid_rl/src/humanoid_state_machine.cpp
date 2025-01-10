@@ -60,7 +60,7 @@ bool HumanoidStateMachine::isValidTransition(State current, State next)
     case DAMPING:
         return next == ZERO_POS;
     case ZERO_POS:
-        return next == DAMPING || next == STAND;
+        return next == DAMPING || next == STAND || next == WALK;
     case STAND:
         return next == ZERO_POS || next == WALK;
     case WALK:
