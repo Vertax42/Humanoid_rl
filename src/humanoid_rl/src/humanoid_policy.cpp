@@ -74,6 +74,11 @@ const std::vector<float>& HumanoidPolicy::get_LastAction() const {
     return _last_action;
 }
 
+// get current observation length
+size_t HumanoidPolicy::get_CurrentObsLength() const {
+    return _obs_history.size();
+}
+
 size_t HumanoidPolicy::count_parameters(const torch::jit::script::Module &model) const
 {
     size_t num_params = 0;

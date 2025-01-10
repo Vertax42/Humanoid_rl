@@ -21,13 +21,16 @@ using namespace zsummer::log4z;
 std::mutex data_mutex; // data mutex for data synchronization
 std::mutex cmd_mutex; // command mutex for command synchronization
 
+std::unordered_map<int, std::string> joint_table;
 std::deque<double> hist_yaw;
 std::vector<double> measured_q_;
 std::vector<double> measured_v_;
 std::vector<double> measured_tau_;
+std::array<double, 3> velocity_;
 std::array<double, 4> quat_est;
 std::array<double, 3> angular_vel_local;
 std::array<double, 3> imu_accel;
+ros::Time last_time;
 
 struct Command {
     // 1 for moving, 0 for standing used for yaw while stand
@@ -274,9 +277,10 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     std::vector<double> q, tmp_q; // 30
     std::vector<double> v, tmp_v; // 30
     std::vector<double> tau, tmp_tau; // 30
-    std::array<double, 4> quat;
-    std::array<double, 3> angular_vel;
-    std::array<double, 3> accel;
+    std::array<double, 4> quat; // 4
+    std::array<double, 3> linear_vel; // 3 add the linear velocity
+    std::array<double, 3> angular_vel; // 3
+    std::array<double, 3> accel; // 3
 
     {
         std::lock_guard<std::mutex> lock(data_mutex); // mutex lock
@@ -285,6 +289,7 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         v = measured_v_;
         tau = measured_tau_;
         quat = quat_est;
+        linear_vel = velocity_; // add the linear velocity
         angular_vel = angular_vel_local;
         accel = imu_accel;
     }
@@ -334,61 +339,51 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     // 7. last_action [a1, a2, ..., a27], [27], 93 # Unoise(n_min=-0.1, n_max=0.1)
     // now we do not use the headding observation so the obs_dim is 93
 
-    for(int i = 0; i < 3; i++) // [3]
+    for(int i = 0; i < 3; i++) // +3 = [3]
     {
-        tmp_obs.push_back(accel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("base linear velocity[%d]: %f", i, accel[i]);
+        tmp_obs.push_back(linear_vel[i] * (i == 0 ? 1 : -1));
+        LOGFMTD("Observation: base linear velocity[%d]: %f", i, linear_vel[i]);
     }
 
-    for(int i = 0; i < 3; i++) // [6]
+    for(int i = 0; i < 3; i++) // +3 = [6]
     {
         tmp_obs.push_back(angular_vel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("base angular velocity[%d]: %f", i, angular_vel[i]);
+        LOGFMTD("Observation: base angular velocity[%d]: %f", i, angular_vel[i]);
     }
 
-    for(int i = 0; i < 3; i++) // [9]
+    for(int i = 0; i < 3; i++) // +3 = [9]
     {
         tmp_obs.push_back(proj_grav[i]);
-        LOGFMTD("base projected gravity[%d]: %f", i, proj_grav[i]);
+        LOGFMTD("Observation: base projected gravity[%d]: %f", i, proj_grav[i]);
     }
     
-    tmp_obs.push_back(local_cmd.x); // [10]
-    tmp_obs.push_back(local_cmd.y); // [11]
-    tmp_obs.push_back(target_yaw_angular); // [12]
-    LOGFMTD("input_cmd.x: %f, input_cmd.y: %f, input_yaw_angular: %f", local_cmd.x, local_cmd.y, target_yaw_angular);
+    tmp_obs.push_back(local_cmd.x); // +1 = [10]
+    LOGFMTD("Observation: user command linear_vel_x: %f", local_cmd.x);
+    tmp_obs.push_back(local_cmd.y); // +1 = [11]
+    LOGFMTD("Observation: user command linear_vel_y: %f", local_cmd.y);
+    tmp_obs.push_back(target_yaw_angular); // +1 = [12]
+    LOGFMTD("Observation: user command target_yaw_angular: %f", target_yaw_angular);
+    // LOGFMTD("input_cmd.x: %f, input_cmd.y: %f, input_yaw_angular: %f", local_cmd.x, local_cmd.y, target_yaw_angular);
     std::vector<size_t> skip_indices = {0, 1, 2, 3, 4, 5, 7+6, 8+6, 17+6};
     for (size_t i = 0; i < q.size(); i++) {
         if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
-            continue; // 跳过当前元素
+            continue; // skip current element
         }
         tmp_obs.push_back(q[i]);
-    }
+        LOGFMTD("Observation: joint_%ld (%s) position: %f", i, joint_table[i].c_str() ,q[i]);
+    } // +27 = [39]
     for (size_t i = 0; i < v.size(); i++) {
         if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
-            continue; // 跳过当前元素
+            continue; // skip current element
         }
         tmp_obs.push_back(v[i]);
-    }
+        LOGFMTD("Observation: joint_%ld (%s) velocity: %f", i, joint_table[i].c_str() ,v[i]);
+    } // +27 = [66]
     for (size_t i = 0; i < last_action.size(); i++) {
         tmp_obs.push_back(last_action[i]);
-    }
-    // for(auto i : q) // [39]
-    // {
-    //     tmp_obs.push_back(i);
-    //     // LOGFMTD("joint position: %f", i);
-    // }
-    // LOGFMTD("obs_q's size: %ld", q.size());
-    // for(auto i : v) // [66]
-    // {
-    //     tmp_obs.push_back(i);
-    //     // LOGFMTD("joint velocity: %f", i);
-    // }
-    // LOGFMTD("obs_v's size: %ld", v.size());
-    // for(auto i : tau) // [93]
-    // {
-    //     tmp_obs.push_back(i);
-    //     // LOGFMTD("joint torque: %f", i);
-    // }
+        LOGFMTD("Observation: joint_%ld (%s) last_action: %f", i, joint_table[i].c_str() ,last_action[i]);
+    } // +27 = [93]
+
     LOGFMTD("tmp_obs's final size: %ld", tmp_obs.size());
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
 
@@ -409,9 +404,10 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     std::vector<double> q, tmp_q;     // 30
     std::vector<double> v, tmp_v;     // 30
     std::vector<double> tau, tmp_tau; // 30
-    std::array<double, 4> quat;
-    std::array<double, 3> angular_vel;
-    std::array<double, 3> accel;
+    std::array<double, 4> quat; // 4
+    std::array<double, 3> linear_vel; // 3
+    std::array<double, 3> angular_vel; // 3
+    std::array<double, 3> accel; // 3
 
     {
         std::lock_guard<std::mutex> lock(data_mutex); // mutex lock
@@ -420,6 +416,7 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         v = measured_v_;
         tau = measured_tau_;
         quat = quat_est;
+        linear_vel = velocity_;
         angular_vel = angular_vel_local;
         accel = imu_accel;
     }
@@ -578,7 +575,7 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               angular_vel_local.begin()); // use angular_vel_local.begin() as output iterator
 
-    // decode imu linear velocity
+    // decode imu linear acceleration
     std::copy(msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size + imu_accel_size,
               imu_accel.begin()); // use imu_accel.begin() as output iterator
@@ -588,6 +585,30 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
         LOGE("Callback function Error!!!!!!!!!!!!!");
         LOGE("+++++++++++++++++++++++++++++++++++++++");
     }
+
+    // get current ros time
+    ros::Time current_time = ros::Time::now();
+    if (last_time.isZero()) { // check if the last time is zero
+        last_time = current_time;
+        // initialize the last_time
+    }
+    double dt = (current_time - last_time).toSec(); // calculate the time diff
+    LOGFMTD("Time diff aka (current_time - last_time): %f", dt);
+    last_time = current_time; // update the last time
+
+    // gravity compensation for IMU acceleration
+    std::array<double, 3> gravity = {0.0, 0.0, 9.81}; // default gravity
+    std::array<double, 3> acceleration_corrected = {
+        imu_accel[0],
+        imu_accel[1],
+        imu_accel[2] + gravity[2] // add the gravity component
+    };
+
+    // calculate linear velocity via IMU acceleration
+    for (size_t i = 0; i < 3; ++i) {
+        velocity_[i] += acceleration_corrected[i] * dt;
+    }
+
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
     return;
 }
@@ -616,6 +637,16 @@ int main(int argc, char **argv)
         return -1; // return -1 if failed to load joint configurations
     }
 
+    // create a joint table of joint_id and joint_name
+    for (const auto &joint : default_joints) {
+        joint_table[joint.id] = joint.name;
+    }
+    
+    // testing output
+    for (const auto &[id, name] : joint_table) {
+        std::cout << "ID: " << id << ", Name: " << name << std::endl;
+    }
+
     ModelConfig config;
     if(loadModelConfig(nh, config))
     {
@@ -638,6 +669,20 @@ int main(int argc, char **argv)
     // model_path, obs_dim, action_dim, history_length, obs_history_length
     
     HumanoidPolicy policy(config.model_path, config.obs_dim, config.action_dim, config.history_length, config.obs_history_length);
+    bool warm_up = false;
+    while(!warm_up)
+    {   
+        size_t current_obs_length = policy.get_CurrentObsLength();
+        if(current_obs_length >= static_cast<size_t>(config.obs_history_length))
+        {
+            warm_up = true;
+            LOGFMTI("Policy inference warm up finished, current observation history size: %ld", current_obs_length);
+        } else {
+            std::vector<float> obs(config.obs_dim, 0.0f);
+        auto output = policy.inference(obs);
+        LOGFMTD("Warm up policy inference, observation history size: %ld", current_obs_length);
+        } 
+    }
 
     std::thread inputThread(handleInput, config.lin_sensitivity, config.ang_sensitivity);
     std::vector<double> pos_des, vel_des, kp, kd, torque; // configure for the joint control parameters

@@ -26,7 +26,8 @@ public:
     // 获取历史观测和动作
     const std::deque<std::vector<float>>& get_ObsHistory() const;
     const std::vector<float>& get_LastAction() const;
-
+    size_t get_CurrentObsLength() const;
+    
     // 打印模型结构
     size_t count_parameters(const torch::jit::script::Module &model) const;
     void print_model_summary(const torch::jit::script::Module &model) const;
