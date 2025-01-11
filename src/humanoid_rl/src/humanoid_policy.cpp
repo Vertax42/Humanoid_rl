@@ -36,7 +36,7 @@ HumanoidPolicy::~HumanoidPolicy()
 }
 
 // inference
-std::vector<float> HumanoidPolicy::inference(const std::vector<float>& observation) {
+std::vector<float> HumanoidPolicy::inference(const std::vector<float>& observation, bool with_history) {
     // check observation size
     if (observation.size() != _obs_dim) {
         throw std::invalid_argument("Invalid observation size.");

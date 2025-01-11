@@ -11,30 +11,30 @@
 #include "utils_common.h"
 class HumanoidPolicy {
 public:
-    // 构造函数
+    // constructor
     HumanoidPolicy(const std::string& model_path, int obs_dim, int action_dim, int history_length, int obs_history_length = 1);
 
-    // 析构函数
+    // destructor
     ~HumanoidPolicy();
 
-    // 推理函数，输入当前观测，返回动作
-    std::vector<float> inference(const std::vector<float>& observation);
+    // inference *action* from *observation* with_history flag
+    std::vector<float> inference(const std::vector<float>& observation, bool with_history = false);
 
-    // 回调预热 && 保存历史观测
+    // record history observation
     size_t record_ObsHistory(const std::vector<float>& observation);
 
-    // 获取历史观测和动作
+    // get history observation and last action
     const std::deque<std::vector<float>>& get_ObsHistory() const;
     const std::vector<float>& get_LastAction() const;
     size_t get_CurrentObsLength() const;
     
-    // 打印模型结构
+    // print model summary
     size_t count_parameters(const torch::jit::script::Module &model) const;
     void print_model_summary(const torch::jit::script::Module &model) const;
     void print_Model() const;
 
 private:
-    // 模型
+    // model
     torch::jit::script::Module _model;
 
     // input and output dimensions

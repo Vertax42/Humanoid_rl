@@ -18,7 +18,7 @@ public:
     std::string stateToString(State state);
     
 private:
-    bool isValidTransition(State current, State next);
+    bool isValidTransition(State current, State next); // check if the transition is valid
 
     ros::NodeHandle &nh_;
     ros::Subscriber state_sub_;

@@ -21,16 +21,19 @@ using namespace zsummer::log4z;
 std::mutex data_mutex; // data mutex for data synchronization
 std::mutex cmd_mutex; // command mutex for command synchronization
 
-std::unordered_map<int, std::string> joint_table;
-std::deque<double> hist_yaw;
-std::vector<double> measured_q_;
-std::vector<double> measured_v_;
-std::vector<double> measured_tau_;
-std::array<double, 3> velocity_;
-std::array<double, 4> quat_est;
-std::array<double, 3> angular_vel_local;
-std::array<double, 3> imu_accel;
+std::unordered_map<int, std::string> joint_table; // joint table [id, name]
+// for callback function >>>
+std::deque<double> hist_yaw; // history yaw angle
+std::vector<double> measured_q_; // measured joint position
+std::vector<double> measured_v_; // measured joint velocity
+std::vector<double> measured_tau_; // measured joint torque
+std::array<double, 3> velocity_; // linear velocity
+std::array<double, 4> quat_est_; // estimated quaternion
+std::array<double, 3> angular_vel_; // angular velocity
+std::array<double, 3> imu_accel_; // imu acceleration
+std::array<double, 3> imu_bias_; // bias of the imu
 ros::Time last_time;
+// <<< for callback function
 
 struct Command {
     // 1 for moving, 0 for standing used for yaw while stand
@@ -92,21 +95,31 @@ bool loadJointConfigs(ros::NodeHandle &nh, const std::string &param_name, std::v
     return true;
 }
 
-// 读取模型配置
+// load model configuration
 bool loadModelConfig(ros::NodeHandle &nh, ModelConfig &config)
 {
     bool success = true;
-    success &= getParamHelper(nh, "model_path", config.model_path);
-    success &= getParamHelper(nh, "obs_dim", config.obs_dim);
-    success &= getParamHelper(nh, "action_dim", config.action_dim);
-    success &= getParamHelper(nh, "history_length", config.history_length);
-    success &= getParamHelper(nh, "obs_history_length", config.obs_history_length);
-    success &= getParamHelper(nh, "lin_sensitivity", config.lin_sensitivity);
-    success &= getParamHelper(nh, "ang_sensitivity", config.ang_sensitivity);
+    success &= getParamHelper(nh, "model/model_path", config.model_path);
+    success &= getParamHelper(nh, "model/obs_dim", config.obs_dim);
+    success &= getParamHelper(nh, "model/action_dim", config.action_dim);
+    success &= getParamHelper(nh, "model/history_length", config.history_length);
+    success &= getParamHelper(nh, "model/obs_history_length", config.obs_history_length);
+    success &= getParamHelper(nh, "model/lin_sensitivity", config.lin_sensitivity);
+    success &= getParamHelper(nh, "model/ang_sensitivity", config.ang_sensitivity);
     return success;
 }
 
-// 打印模型配置
+// load imu configuration
+bool loadImuConfig(ros::NodeHandle &nh, std::array<double, 3> &imu_bias)
+{
+    bool success = true;
+    success &= getParamHelper(nh, "imu/bias_x", imu_bias[0]);
+    success &= getParamHelper(nh, "imu/bias_y", imu_bias[1]);
+    success &= getParamHelper(nh, "imu/bias_z", imu_bias[2]);
+    return success;
+}
+
+// print model configuration
 void printModelConfig(const ModelConfig &config)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
@@ -288,10 +301,10 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         q = measured_q_;
         v = measured_v_;
         tau = measured_tau_;
-        quat = quat_est;
+        quat = quat_est_;
         linear_vel = velocity_; // add the linear velocity
-        angular_vel = angular_vel_local;
-        accel = imu_accel;
+        angular_vel = angular_vel_;
+        accel = imu_accel_;
     }
 
     if(q.empty() || v.empty() || tau.empty()) // check if the measured data is empty
@@ -325,7 +338,7 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
 
     LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
-    std::array<double, 3> proj_grav = quat_rotate_inverse(quat_est, gravity);
+    std::array<double, 3> proj_grav = quat_rotate_inverse(quat, gravity);
     proj_grav[0] *= -1.;
 
     // use std::remove_if and lambda to remove elements
@@ -415,10 +428,10 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         q = measured_q_;
         v = measured_v_;
         tau = measured_tau_;
-        quat = quat_est;
+        quat = quat_est_;
         linear_vel = velocity_;
-        angular_vel = angular_vel_local;
-        accel = imu_accel;
+        angular_vel = angular_vel_;
+        accel = imu_accel_;
     }
 
     if(q.empty() || v.empty() || tau.empty()) // check if the measured data is empty
@@ -453,7 +466,9 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
 
     LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
-    std::array<double, 3> proj_grav = quat_rotate_inverse(quat_est, gravity);
+
+    // gravity(0, 0, -0.981) in world frame
+    std::array<double, 3> proj_grav = quat_rotate_inverse(quat, gravity);
     proj_grav[0] *= -1.;
 
     
@@ -568,17 +583,17 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
     
     // decode quaternion
     std::copy(msg->data.begin() + 3 * total_joints, msg->data.begin() + 3 * total_joints + quat_size,
-              quat_est.begin()); // 使用 quat_est.begin() 作为输出迭代器
+              quat_est_.begin()); // 使用 quat_est_.begin() 作为输出迭代器
 
     // decode angular velocity
     std::copy(msg->data.begin() + 3 * total_joints + quat_size,
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
-              angular_vel_local.begin()); // use angular_vel_local.begin() as output iterator
+              angular_vel_.begin()); // use angular_vel_.begin() as output iterator
 
     // decode imu linear acceleration
     std::copy(msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size + imu_accel_size,
-              imu_accel.begin()); // use imu_accel.begin() as output iterator
+              imu_accel_.begin()); // use imu_accel_.begin() as output iterator
     
     // LOGE("Callback function!");
     if(measured_q_.empty() || measured_v_.empty() || measured_tau_.empty()) {
@@ -595,13 +610,12 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
     double dt = (current_time - last_time).toSec(); // calculate the time diff
     LOGFMTD("Time diff aka (current_time - last_time): %f", dt);
     last_time = current_time; // update the last time
-
+    LOGFMTD("Received imu_accel: (%f, %f, %f)", imu_accel_[0], imu_accel_[1], imu_accel_[2]);
     // gravity compensation for IMU acceleration
-    std::array<double, 3> gravity = {0.0, 0.0, 9.81}; // default gravity
     std::array<double, 3> acceleration_corrected = {
-        imu_accel[0],
-        imu_accel[1],
-        imu_accel[2] + gravity[2] // add the gravity component
+        imu_accel_[0] + imu_bias_[0],
+        imu_accel_[1] + imu_bias_[1], 
+        imu_accel_[2] + imu_bias_[2]
     };
 
     // calculate linear velocity via IMU acceleration
@@ -644,7 +658,7 @@ int main(int argc, char **argv)
     
     // testing output
     for (const auto &[id, name] : joint_table) {
-        std::cout << "ID: " << id << ", Name: " << name << std::endl;
+        LOGFMTD("ID: %d, Name: %s", id, name.c_str());
     }
 
     ModelConfig config;
@@ -655,12 +669,19 @@ int main(int argc, char **argv)
         if(env_pos != std::string::npos)
         {
             const char *home_dir = getenv("HOME");
-            config.model_path.replace(env_pos, 11, home_dir); // 11 是 "$(env HOME)" 的长度
+            config.model_path.replace(env_pos, 11, home_dir); // 11 is the length of "$(env HOME)"
         }
         printModelConfig(config);
-    } else
-    {
+    } else {
         LOGE("Failed to load model configuration from parameter server!");
+        return -1;
+    }
+
+    if(loadImuConfig(nh, imu_bias_))
+    {
+        LOGFMTI("IMU bias: (%f, %f, %f)", imu_bias_[0], imu_bias_[1], imu_bias_[2]);
+    } else {
+        LOGE("Failed to load IMU bias from parameter server!");
         return -1;
     }
     // humanoid state machine class

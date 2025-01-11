@@ -47,6 +47,10 @@ T clip(T value, T min, T max);
 template <typename T>
 bool getParamHelper(ros::NodeHandle &nh, const std::string &param_name, T &param_value);
 
+bool loadJointConfigs(ros::NodeHandle &nh, const std::string &param_name, std::vector<JointConfig> &default_joints);
+
+bool loadImuConfig(ros::NodeHandle &nh, std::array<double, 3> &imu_bias);
+
 bool loadModelConfig(ros::NodeHandle &nh, ModelConfig &config);
 
 void printModelConfig(const ModelConfig &config);
