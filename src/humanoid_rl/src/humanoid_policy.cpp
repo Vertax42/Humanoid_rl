@@ -15,7 +15,7 @@ HumanoidPolicy::HumanoidPolicy(const std::string& model_path, int obs_dim, int a
         throw std::invalid_argument("Invalid dimensions or history length provided.");
     }
     // initialize history && last_action
-    _obs_history.resize(_history_length);
+    _obs_history.resize(_obs_history_length, std::vector<float>(_obs_dim, 0.0f));
     _last_action.resize(_action_dim, 0.0f);
     // logInfo && print parameters
     LOGI("=============================================================");
@@ -41,17 +41,37 @@ std::vector<float> HumanoidPolicy::inference(const std::vector<float>& observati
     if (observation.size() != _obs_dim) {
         throw std::invalid_argument("Invalid observation size.");
     }
-    // convert observation to tensor, add batch dimension
-    torch::Tensor input_tensor = torch::tensor(observation, torch::kFloat32).unsqueeze(0).contiguous(); // [1, obs_dim] [1, 93]
+
+    if(with_history) {
+        torch::Tensor input_tensor = torch::zeros({_obs_dim * _obs_history_length}, torch::kFloat32); // [47 x 15] [705]
+        _obs_history.push_back(observation); // only update observation history
+        _obs_history.pop_front(); // pop the front element
+        // flatten observation history
+        for (size_t i = 0; i < _obs_history.size(); i++) {
+            for (size_t j = 0; j < _obs_dim; j++) {
+                input_tensor.index_put_({i * (int)_obs_history[0].size() + j}, _obs_history[i][j]);
+            }
+        }
+        LOGFMTD("After flatten observation history, input_tensor size: %ld", input_tensor.size(0));
+    } else {
+        // convert observation to tensor, add batch dimension
+        torch::Tensor input_tensor = torch::tensor(observation, torch::kFloat32).unsqueeze(0).contiguous(); // [1, obs_dim] [1, 93]
+    }
+    
     // observation tensor preprocessing
-    // ......TODO
+    
     // get action tensor
     torch::Tensor action_tensor = _model.forward({input_tensor}).toTensor(); // [1, action_dim] [1, 27]
     // convert action tensor to vector
     std::vector<float> action(_action_dim);
     std::memcpy(action.data(), action_tensor.data_ptr(), _action_dim * sizeof(float));
     // update history
-    update_History(observation, action);
+    if(with_history) {
+        _last_action = action; // because the observation history has been updated
+    } else {
+        update_History(observation, action);
+    }
+    // update_History(observation, action);
     return action;
 }
 
