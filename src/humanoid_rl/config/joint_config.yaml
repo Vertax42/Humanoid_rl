@@ -143,7 +143,7 @@ default_joints:
     torque: 7.0
     upper_limit: 2.09
     lower_limit: -2.09
-  - index: 1
+  - index: 16
     name: waist_yaw_joint
     pos_des: -0.5
     vel_des: -0.1

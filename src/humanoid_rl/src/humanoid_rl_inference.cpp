@@ -88,6 +88,7 @@ bool loadJointConfigs(ros::NodeHandle &nh, const std::string &param_name, std::v
         config.torque = static_cast<double>(joint["torque"]);
         config.upper_limit = static_cast<double>(joint["upper_limit"]);
         config.lower_limit = static_cast<double>(joint["lower_limit"]);
+        // LOGFMTD("Joint index: %d, name: %s", config.id, config.name.c_str());
         default_joints.push_back(config);
     }
 
@@ -320,6 +321,7 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     {
         throw std::runtime_error("Invalid quaternion (all zeros).");
         LOGE("Invalid quaternion (all zeros).");
+        return std::vector<float>();
     }
 
     EulerAngle euler = QuaternionToEuler(Quaternion{ quat[0], quat[1], quat[2], quat[3] }); // convert quaternion to euler angle
@@ -342,7 +344,7 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     proj_grav[0] *= -1.;
 
     // use std::remove_if and lambda to remove elements
-    //// 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
+    // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
     // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
     // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
     // 4. input commands [vx, vy, vyaw, ----vheading], [3], 12 # user_cmd.x, user_cmd.y, user_cmd.yaw, user_cmd.heading
@@ -355,46 +357,53 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     for(int i = 0; i < 3; i++) // +3 = [3]
     {
         tmp_obs.push_back(linear_vel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("Observation: base linear velocity[%d]: %f", i, linear_vel[i]);
+        LOGFMTD("Observation[%d]: base linear velocity[%d]: %f", i , i, linear_vel[i]);
     }
 
     for(int i = 0; i < 3; i++) // +3 = [6]
     {
         tmp_obs.push_back(angular_vel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("Observation: base angular velocity[%d]: %f", i, angular_vel[i]);
+        LOGFMTD("Observation[%d]: base angular velocity[%d]: %f", i + 3, i, angular_vel[i]);
     }
 
     for(int i = 0; i < 3; i++) // +3 = [9]
     {
         tmp_obs.push_back(proj_grav[i]);
-        LOGFMTD("Observation: base projected gravity[%d]: %f", i, proj_grav[i]);
+        LOGFMTD("Observation[%d]: base projected gravity[%d]: %f", i + 6, i, proj_grav[i]);
     }
     
     tmp_obs.push_back(local_cmd.x); // +1 = [10]
-    LOGFMTD("Observation: user command linear_vel_x: %f", local_cmd.x);
+    LOGFMTD("Observation[%d]: user command linear_vel_x: %f", 9, local_cmd.x);
     tmp_obs.push_back(local_cmd.y); // +1 = [11]
-    LOGFMTD("Observation: user command linear_vel_y: %f", local_cmd.y);
+    LOGFMTD("Observation[%d]: user command linear_vel_y: %f", 10, local_cmd.y);
     tmp_obs.push_back(target_yaw_angular); // +1 = [12]
-    LOGFMTD("Observation: user command target_yaw_angular: %f", target_yaw_angular);
-    // LOGFMTD("input_cmd.x: %f, input_cmd.y: %f, input_yaw_angular: %f", local_cmd.x, local_cmd.y, target_yaw_angular);
+    LOGFMTD("Observation[%d]: user command target_yaw_angular: %f", 11, target_yaw_angular);
+    
     std::vector<size_t> skip_indices = {0, 1, 2, 3, 4, 5, 7+6, 8+6, 17+6};
+    const size_t joint_index_map[] = {
+        0, 1, 2, 3, 4, 5, 6,  // 0-6
+        9, 10, 11, 12, 13, 14, 15, 16,  // skip 7,8
+        18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29  // skip 17
+    };
+    
     for (size_t i = 0; i < q.size(); i++) {
         if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
             continue; // skip current element
         }
         tmp_obs.push_back(q[i]);
-        LOGFMTD("Observation: joint_%ld (%s) position: %f", i, joint_table[i].c_str() ,q[i]);
+        LOGFMTD("Observation[%ld]: joint_%ld (%s) position: %f", i + 12, i - 6, joint_table[i - 6].c_str() ,q[i]);
     } // +27 = [39]
     for (size_t i = 0; i < v.size(); i++) {
         if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
             continue; // skip current element
         }
         tmp_obs.push_back(v[i]);
-        LOGFMTD("Observation: joint_%ld (%s) velocity: %f", i, joint_table[i].c_str() ,v[i]);
+        LOGFMTD("Observation[%ld]: joint_%ld (%s) velocity: %f", i + 39, i - 6, joint_table[i - 6].c_str() ,v[i]);
     } // +27 = [66]
     for (size_t i = 0; i < last_action.size(); i++) {
         tmp_obs.push_back(last_action[i]);
-        LOGFMTD("Observation: joint_%ld (%s) last_action: %f", i, joint_table[i].c_str() ,last_action[i]);
+        size_t joint_index = joint_index_map[i];
+        LOGFMTD("Observation[%ld]: joint_%ld (%s) last_action: %f", i + 66, i, joint_table[joint_index].c_str(), last_action[i]);
     } // +27 = [93]
 
     LOGFMTD("tmp_obs's final size: %ld", tmp_obs.size());
@@ -406,7 +415,7 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
 std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action, HumanoidPolicy &policy)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
-    std::vector<float> tmp_obs; // 47 * 15 = 705
+    std::vector<float> tmp_obs; // 47
     Command local_cmd;
     {
         std::lock_guard<std::mutex> cmd_lock(cmd_mutex);
@@ -414,11 +423,11 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     }
 
     // create tmp current data copy 7: neck_yaw_joint, 8: neck_pitch_joint, 17: waist_roll_joint
-    std::vector<double> q, tmp_q;     // 30
-    std::vector<double> v, tmp_v;     // 30
+    std::vector<double> q, tmp_q; // 30
+    std::vector<double> v, tmp_v; // 30
     std::vector<double> tau, tmp_tau; // 30
     std::array<double, 4> quat; // 4
-    std::array<double, 3> linear_vel; // 3
+    std::array<double, 3> linear_vel; // 3 add the linear velocity
     std::array<double, 3> angular_vel; // 3
     std::array<double, 3> accel; // 3
 
@@ -429,13 +438,13 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         v = measured_v_;
         tau = measured_tau_;
         quat = quat_est_;
-        linear_vel = velocity_;
+        linear_vel = velocity_; // add the linear velocity
         angular_vel = angular_vel_;
         accel = imu_accel_;
     }
 
     if(q.empty() || v.empty() || tau.empty()) // check if the measured data is empty
-    {
+    {   
         LOGFMTD("q, v, tau vector size: %ld, %ld, %ld", q.size(), v.size(), v.size());
         LOGE("Measured data (q, v, or tau) is empty.");
         // throw std::runtime_error("Measured data (q, v, or tau) is empty.");
@@ -447,32 +456,30 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     {
         throw std::runtime_error("Invalid quaternion (all zeros).");
         LOGE("Invalid quaternion (all zeros).");
+        return std::vector<float>();
     }
 
-    EulerAngle euler
-        = QuaternionToEuler(Quaternion{ quat[0], quat[1], quat[2], quat[3] }); // convert quaternion to euler angle
-    if(std::isnan(euler.yaw))                                                  // check if the yaw angle is NaN
+    EulerAngle euler = QuaternionToEuler(Quaternion{ quat[0], quat[1], quat[2], quat[3] }); // convert quaternion to euler angle
+    if(std::isnan(euler.yaw)) // check if the yaw angle is NaN
     {
         throw std::runtime_error("Invalid yaw angle (NaN).");
         LOGE("Invalid yaw angle (NaN).");
     }
     double current_yaw = euler.yaw * -1.0; // current yaw angle
-
-    hist_yaw.push_back(current_yaw);                // push back the current yaw angle
-    if(hist_yaw.size() >= 30) hist_yaw.pop_front(); // pop the front element if the size is greater than 10
-    double base_yaw = std::accumulate(hist_yaw.begin(), hist_yaw.end(), 0.0)
-                      / hist_yaw.size(); // calculate the average yaw angle as the base yaw angle
+    
+    hist_yaw.push_back(current_yaw); // push back the current yaw angle
+    if(hist_yaw.size() >= 30) 
+        hist_yaw.pop_front(); // pop the front element if the size is greater than 10
+    double base_yaw = std::accumulate(hist_yaw.begin(), hist_yaw.end(), 0.0) / hist_yaw.size(); // calculate the average yaw angle as the base yaw angle
     double target_yaw_angular
         = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
 
     LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
-
-    // gravity(0, 0, -0.981) in world frame
     std::array<double, 3> proj_grav = quat_rotate_inverse(quat, gravity);
     proj_grav[0] *= -1.;
 
-    
-    // 1. command input 2D (sin_pos, cos_pos) + 3D command [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
+    // use std::remove_if and lambda to remove elements
+    // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
     // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
     // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
     // 4. input commands [vx, vy, vyaw, ----vheading], [3], 12 # user_cmd.x, user_cmd.y, user_cmd.yaw, user_cmd.heading
@@ -482,66 +489,58 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     // 7. last_action [a1, a2, ..., a27], [27], 93 # Unoise(n_min=-0.1, n_max=0.1)
     // now we do not use the headding observation so the obs_dim is 93
 
-    for(int i = 0; i < 3; i++) // [3]
+    for(int i = 0; i < 3; i++) // +3 = [3]
     {
-        tmp_obs.push_back(accel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("base linear velocity[%d]: %f", i, accel[i]);
+        tmp_obs.push_back(linear_vel[i] * (i == 0 ? 1 : -1));
+        LOGFMTD("Observation[%d]: base linear velocity[%d]: %f", i , i, linear_vel[i]);
     }
 
-    for(int i = 0; i < 3; i++) // [6]
+    for(int i = 0; i < 3; i++) // +3 = [6]
     {
         tmp_obs.push_back(angular_vel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("base angular velocity[%d]: %f", i, angular_vel[i]);
+        LOGFMTD("Observation[%d]: base angular velocity[%d]: %f", i + 3, i, angular_vel[i]);
     }
 
-    for(int i = 0; i < 3; i++) // [9]
+    for(int i = 0; i < 3; i++) // +3 = [9]
     {
         tmp_obs.push_back(proj_grav[i]);
-        LOGFMTD("base projected gravity[%d]: %f", i, proj_grav[i]);
+        LOGFMTD("Observation[%d]: base projected gravity[%d]: %f", i + 6, i, proj_grav[i]);
     }
-
-    tmp_obs.push_back(local_cmd.x);        // [10]
-    tmp_obs.push_back(local_cmd.y);        // [11]
-    tmp_obs.push_back(target_yaw_angular); // [12]
-    LOGFMTD("input_cmd.x: %f, input_cmd.y: %f, input_yaw_angular: %f", local_cmd.x, local_cmd.y, target_yaw_angular);
-    std::vector<size_t> skip_indices = { 0, 1, 2, 3, 4, 5, 7 + 6, 8 + 6, 17 + 6 };
-    for(size_t i = 0; i < q.size(); i++)
-    {
-        if(std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end())
-        {
-            continue; // 跳过当前元素
+    
+    tmp_obs.push_back(local_cmd.x); // +1 = [10]
+    LOGFMTD("Observation[%d]: user command linear_vel_x: %f", 9, local_cmd.x);
+    tmp_obs.push_back(local_cmd.y); // +1 = [11]
+    LOGFMTD("Observation[%d]: user command linear_vel_y: %f", 10, local_cmd.y);
+    tmp_obs.push_back(target_yaw_angular); // +1 = [12]
+    LOGFMTD("Observation[%d]: user command target_yaw_angular: %f", 11, target_yaw_angular);
+    
+    std::vector<size_t> skip_indices = {0, 1, 2, 3, 4, 5, 7+6, 8+6, 17+6};
+    const size_t joint_index_map[] = {
+        0, 1, 2, 3, 4, 5, 6,  // 0-6
+        9, 10, 11, 12, 13, 14, 15, 16,  // skip 7,8
+        18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29  // skip 17
+    };
+    
+    for (size_t i = 0; i < q.size(); i++) {
+        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
+            continue; // skip current element
         }
         tmp_obs.push_back(q[i]);
-    }
-    for(size_t i = 0; i < v.size(); i++)
-    {
-        if(std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end())
-        {
-            continue; // 跳过当前元素
+        LOGFMTD("Observation[%ld]: joint_%ld (%s) position: %f", i + 12, i - 6, joint_table[i - 6].c_str() ,q[i]);
+    } // +27 = [39]
+    for (size_t i = 0; i < v.size(); i++) {
+        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
+            continue; // skip current element
         }
         tmp_obs.push_back(v[i]);
-    }
-    for(size_t i = 0; i < last_action.size(); i++)
-    {
+        LOGFMTD("Observation[%ld]: joint_%ld (%s) velocity: %f", i + 39, i - 6, joint_table[i - 6].c_str() ,v[i]);
+    } // +27 = [66]
+    for (size_t i = 0; i < last_action.size(); i++) {
         tmp_obs.push_back(last_action[i]);
-    }
-    // for(auto i : q) // [39]
-    // {
-    //     tmp_obs.push_back(i);
-    //     // LOGFMTD("joint position: %f", i);
-    // }
-    // LOGFMTD("obs_q's size: %ld", q.size());
-    // for(auto i : v) // [66]
-    // {
-    //     tmp_obs.push_back(i);
-    //     // LOGFMTD("joint velocity: %f", i);
-    // }
-    // LOGFMTD("obs_v's size: %ld", v.size());
-    // for(auto i : tau) // [93]
-    // {
-    //     tmp_obs.push_back(i);
-    //     // LOGFMTD("joint torque: %f", i);
-    // }
+        size_t joint_index = joint_index_map[i];
+        LOGFMTD("Observation[%ld]: joint_%ld (%s) last_action: %f", i + 66, i, joint_table[joint_index].c_str(), last_action[i]);
+    } // +27 = [93]
+
     LOGFMTD("tmp_obs's final size: %ld", tmp_obs.size());
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
 
@@ -657,8 +656,8 @@ int main(int argc, char **argv)
     }
     
     // testing output
-    for (const auto &[id, name] : joint_table) {
-        LOGFMTD("ID: %d, Name: %s", id, name.c_str());
+    for (size_t i = 0; i < joint_table.size(); i++) {
+        LOGFMTD("Joint_table ID: %ld, Joint_table Name: %s", i, joint_table[i].c_str());
     }
 
     ModelConfig config;
@@ -780,6 +779,14 @@ int main(int argc, char **argv)
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
             LOGFMTI("In startup loop, time cycle: %ld", cycle_count);
+            
+            auto duration = std::chrono::steady_clock::now() - start_time;
+            auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+            int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
+            // LOGFMTW("Sleep time: %d us", sleep_time);
+            duration = std::chrono::steady_clock::now() - start_time;
+            LOGFMTA("Startup loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+            std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
             ros::spinOnce();
             continue;
         } else if(cycle_count <= init_cycle && !initFlag) {
@@ -805,6 +812,14 @@ int main(int argc, char **argv)
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
             LOGFMTI("In init cycle loop, time cycle: %ld", cycle_count);
+
+            auto duration = std::chrono::steady_clock::now() - start_time;
+            auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+            int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
+            // LOGFMTW("Sleep time: %d us", sleep_time);
+            duration = std::chrono::steady_clock::now() - start_time;
+            LOGFMTA("Init loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+            std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
             ros::spinOnce();
             continue;
         } else if(cycle_count > init_cycle && !initFlag) {
