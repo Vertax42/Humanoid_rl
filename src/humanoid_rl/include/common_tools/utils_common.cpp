@@ -12,7 +12,7 @@ void dump_program_info_log4z(const std::string &app_name)
     strftime(szTime, 80, "%H:%M:%S", tmp);
     strftime(szDate, 80, "%Y/%m/%d", tmp);
 
-    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
+    // zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
     std::string cpu_info = common_tools::get_cpu_info();
     std::string ram_info = common_tools::get_RAM_info();
     std::string os_info = common_tools::get_OS_info();
@@ -31,7 +31,53 @@ void dump_program_info_log4z(const std::string &app_name)
     LOGFMTD("Date mow   : %s", current_date_time.c_str());
     LOGD("=============================================================");
 
-    zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
+    #ifdef HUMANOID_RL_VERSION_STRING // Has Humanoid_rl
+    LOGFMTD("Humanoid_rl version    : %d.%d.%d.%d", HUMANOID_RL_MAJOR, HUMANOID_RL_MINOR, HUMANOID_RL_PATCH, HUMANOID_RL_BUILD);
+#endif
+
+#ifdef __GNUC_PATCHLEVEL__
+    LOGFMTD("GCC version            : %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#endif
+
+#ifdef QT_VERSION // Has Qt
+    LOGFMTD("Qt version             : %d.%d.%d", (QT_VERSION >> 16), ((QT_VERSION >> 8) & 0xFF), (QT_VERSION & 0xFF));
+#endif
+
+#ifdef BOOST_VERSION // Has Boost
+    LOGFMTD("Boost version          : %d.%d.%d", BOOST_VERSION / 100000, BOOST_VERSION / 100 % 1000, BOOST_VERSION % 100);
+#endif
+
+#ifdef EIGEN_MINOR_VERSION // Has Eigen
+    LOGFMTD("Eigen version          : %d.%d.%d", EIGEN_WORLD_VERSION, EIGEN_MAJOR_VERSION, EIGEN_MINOR_VERSION);
+#endif
+
+#ifdef VTK_MAJOR_VERSION
+    LOGFMTD("VTK version            : %d.%d.%d", VTK_MAJOR_VERSION, VTK_MINOR_VERSION, VTK_BUILD_VERSION);
+#endif
+
+#ifdef PCL_VERSION // Has PCL
+    LOGFMTD("PCL version            : %d.%d.%d", PCL_MAJOR_VERSION, PCL_MINOR_VERSION, PCL_REVISION_VERSION);
+#endif
+
+#ifdef CV_VERSION_REVISION // Has OpenCV
+    LOGFMTD("OpenCV version         : %d.%d.%d", CV_MAJOR_VERSION, CV_MINOR_VERSION, CV_VERSION_REVISION);
+#endif
+
+#ifdef CERES_VERSION_PATCH // Has Ceres-solver
+    LOGFMTD("Ceres-solver version   : %d.%d.%d", CERES_VERSION_MAJOR, CERES_VERSION_MINOR, CERES_VERSION_PATCH);
+#endif
+
+#ifdef CGAL_BUGFIX_VERSION // Has CGAL
+    LOGFMTD("CGAL version           : %d.%d.%d", CGAL_MAJOR_VERSION, CGAL_MINOR_VERSION, CGAL_BUGFIX_VERSION);
+#endif
+
+#ifdef CGAL_VERSION // Has CGAL
+    LOGFMTD("CGAL version           : %s", CGAL_VERSION);
+#endif
+
+    LOGD("=============================================================");
+
+    //zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
 }
 
 void clean_log_files(int max_log_count)

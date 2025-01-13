@@ -23,7 +23,7 @@ std::mutex cmd_mutex; // command mutex for command synchronization
 
 std::unordered_map<int, std::string> joint_table; // joint table [id, name]
 // for callback function >>>
-std::deque<double> hist_yaw; // history yaw angle
+std::deque<double> hist_yaw_; // history yaw angle
 std::vector<double> measured_q_; // measured joint position
 std::vector<double> measured_v_; // measured joint velocity
 std::vector<double> measured_tau_; // measured joint torque
@@ -32,13 +32,14 @@ std::array<double, 4> quat_est_; // estimated quaternion
 std::array<double, 3> angular_vel_; // angular velocity
 std::array<double, 3> imu_accel_; // imu acceleration
 std::array<double, 3> imu_bias_; // bias of the imu
+std::array<double, 3> proj_grav_ = {0.0, 0.0, -0.981};// projected gravity z-axis
 ros::Time last_time;
 // <<< for callback function
 
 struct Command {
     // 1 for moving, 0 for standing used for yaw while stand
     double x, y, yaw, heading, move;
-    Command(double _x = 0.0, double _y = 0.0, double _yaw = 0.0, double _heading = 0.64, double _move = 0.)
+    Command(double _x = 0.0, double _y = 0.0, double _yaw = 0.0, double _heading = 0.64, double _move = 1.0)
         : x(_x), y(_y), yaw(_yaw), heading(_heading), move(_move)
     {}
 } user_cmd;
@@ -332,18 +333,17 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
     }
     double current_yaw = euler.yaw * -1.0; // current yaw angle
     
-    hist_yaw.push_back(current_yaw); // push back the current yaw angle
-    if(hist_yaw.size() >= 30) 
-        hist_yaw.pop_front(); // pop the front element if the size is greater than 10
-    double base_yaw = std::accumulate(hist_yaw.begin(), hist_yaw.end(), 0.0) / hist_yaw.size(); // calculate the average yaw angle as the base yaw angle
+    hist_yaw_.push_back(current_yaw); // push back the current yaw angle
+    if(hist_yaw_.size() >= HIST_YAW_SIZE) 
+        hist_yaw_.pop_front(); // pop the front element if the size is greater than 10
+    double base_yaw = std::accumulate(hist_yaw_.begin(), hist_yaw_.end(), 0.0) / hist_yaw_.size(); // calculate the average yaw angle as the base yaw angle
     double target_yaw_angular
         = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
 
     LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
-    std::array<double, 3> proj_grav = quat_rotate_inverse(quat, gravity);
-    proj_grav[0] *= -1.;
+    proj_grav_ = quat_rotate_inverse(quat, gravity);
+    proj_grav_[0] *= -1.;
 
-    // use std::remove_if and lambda to remove elements
     // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
     // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
     // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
@@ -368,8 +368,8 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
 
     for(int i = 0; i < 3; i++) // +3 = [9]
     {
-        tmp_obs.push_back(proj_grav[i]);
-        LOGFMTD("Observation[%d]: base projected gravity[%d]: %f", i + 6, i, proj_grav[i]);
+        tmp_obs.push_back(proj_grav_[i]);
+        LOGFMTD("Observation[%d]: base projected gravity[%d]: %f", i + 6, i, proj_grav_[i]);
     }
     
     tmp_obs.push_back(local_cmd.x); // +1 = [10]
@@ -406,13 +406,13 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         LOGFMTD("Observation[%ld]: joint_%ld (%s) last_action: %f", i + 66, i, joint_table[joint_index].c_str(), last_action[i]);
     } // +27 = [93]
 
-    LOGFMTD("tmp_obs's final size: %ld", tmp_obs.size());
+    LOGFMTD("tmp_observation's final size: %ld", tmp_obs.size());
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
 
     return tmp_obs;
 }
 
-std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action, HumanoidPolicy &policy)
+std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action, double cycle_count, double start_to_walk_cycle, bool with_history)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
     std::vector<float> tmp_obs; // 47
@@ -459,89 +459,89 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
         return std::vector<float>();
     }
 
+    LOGFMTD("Before quaternion to euler, quat: %f, %f, %f, %f", quat[0], quat[1], quat[2], quat[3]);
     EulerAngle euler = QuaternionToEuler(Quaternion{ quat[0], quat[1], quat[2], quat[3] }); // convert quaternion to euler angle
+    LOGFMTD("After quaternion to euler, euler: %f, %f, %f", euler.roll, euler.pitch, euler.yaw);
     if(std::isnan(euler.yaw)) // check if the yaw angle is NaN
     {
         throw std::runtime_error("Invalid yaw angle (NaN).");
         LOGE("Invalid yaw angle (NaN).");
     }
     double current_yaw = euler.yaw * -1.0; // current yaw angle
-    
-    hist_yaw.push_back(current_yaw); // push back the current yaw angle
-    if(hist_yaw.size() >= 30) 
-        hist_yaw.pop_front(); // pop the front element if the size is greater than 10
-    double base_yaw = std::accumulate(hist_yaw.begin(), hist_yaw.end(), 0.0) / hist_yaw.size(); // calculate the average yaw angle as the base yaw angle
+
+    LOGFMTD("Current yaw angle: %f", current_yaw);
+
+    hist_yaw_.push_back(current_yaw); // push back the current yaw angle
+    if(hist_yaw_.size() >= HIST_YAW_SIZE) 
+        hist_yaw_.pop_front(); // pop the front element if the size is greater than 10
+    double base_yaw = std::accumulate(hist_yaw_.begin(), hist_yaw_.end(), 0.0) / hist_yaw_.size(); // calculate the average yaw angle as the base yaw angle
+    LOGFMTD("Base yaw angle: %f", base_yaw);
     double target_yaw_angular
         = -0.5 * ((euler.yaw * -1.0 - base_yaw) - local_cmd.yaw) * local_cmd.move; // calculate the target yaw angular
-
+    target_yaw_angular = clip(target_yaw_angular, -0.4, 0.4);
+    LOGFMTD("Target yaw angular: %f", target_yaw_angular);
     LOGFMTD("Before elements remove, q, v, tau have %ld, %ld, %ld elements!", q.size(), v.size(), tau.size());
-    std::array<double, 3> proj_grav = quat_rotate_inverse(quat, gravity);
-    proj_grav[0] *= -1.;
+    proj_grav_ = quat_rotate_inverse(quat, gravity);
+    proj_grav_[0] *= -1.;
 
-    // use std::remove_if and lambda to remove elements
-    // 1. linear velocity robot frame [lx, ly, lz], [3], 3 # Unoise(n_min=-0.1, n_max=0.1)
-    // 2. angular velocity robot frame [ax, ay, az], [3], 6 # Unoise(n_min=-0.2, n_max=0.2)
-    // 3. projected gravity robot frame [gx, gy, gz], [3], 9 # Unoise(n_min=-0.05, n_max=0.05)
-    // 4. input commands [vx, vy, vyaw, ----vheading], [3], 12 # user_cmd.x, user_cmd.y, user_cmd.yaw, user_cmd.heading
-    // 5. joint rel position [q1, q2, ..., q30], [27], 39 # default_joints_pos set to 0 Unoise(n_min=-0.01,
-    // n_max=0.01)
-    // 6. joint rel velocity [v1, v2, ..., v30], [27], 66 # default_joints_vel set to 0 Unoise(n_min=-1.5, n_max=1.5)
-    // 7. last_action [a1, a2, ..., a27], [27], 93 # Unoise(n_min=-0.1, n_max=0.1)
-    // now we do not use the headding observation so the obs_dim is 93
+    double cycle_time = 0.64;
+    double sin_p = std::sin(2 * PI * (cycle_count - start_to_walk_cycle) * (1.0 / CONTROL_FREQUENCY) / cycle_time);
+    double cos_p = std::cos(2 * PI * (cycle_count - start_to_walk_cycle) * (1.0 / CONTROL_FREQUENCY) / cycle_time);
 
-    for(int i = 0; i < 3; i++) // +3 = [3]
+    LOGFMTD("Walking cycle progress: %f", (cycle_count - start_to_walk_cycle) * (1.0 / CONTROL_FREQUENCY) / cycle_time);
+    LOGFMTD("Start walking cycle: %f, cycle count now: %f", start_to_walk_cycle, cycle_count);
+
+    // 1. command_input  [sin, cos, vel_x, vel_y, aug_vel_yaw], 5
+    // 2. leg joint position [q1, q2, ..., q12], 5 + 12 = 17
+    // 3. leg joint velocity, [v1, v2, ..., v12], 17 + 12 = 29
+    // 4. last actions, [a1, a2, ..., a12], 29 + 12 = 41
+    // 5. base angular velocity, [wx, wy, wz], 41 + 3 = 44
+    // 6. base euler angle, [roll, pitch, yaw], 44 + 3 = 47
+
+    if(with_history)
     {
-        tmp_obs.push_back(linear_vel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("Observation[%d]: base linear velocity[%d]: %f", i , i, linear_vel[i]);
-    }
+        tmp_obs.push_back(sin_p); // +1 = [1]
+        tmp_obs.push_back(cos_p); // +1 = [2]
+        LOGFMTD("Observation[%d]: sin_p: %f", 0, sin_p);
+        LOGFMTD("Observation[%d]: cos_p: %f", 1, cos_p);
+        tmp_obs.push_back(local_cmd.x); // +1 = [3]
+        LOGFMTD("Observation[%d]: user command linear_vel_x: %f", 2, local_cmd.x);
+        tmp_obs.push_back(local_cmd.y); // +1 = [4]
+        LOGFMTD("Observation[%d]: user command linear_vel_y: %f", 3, local_cmd.y);
+        tmp_obs.push_back(target_yaw_angular); // +1 = [5]
+        LOGFMTD("Observation[%d]: user command cliped target_yaw_angular: %f", 4, target_yaw_angular);
 
-    for(int i = 0; i < 3; i++) // +3 = [6]
-    {
-        tmp_obs.push_back(angular_vel[i] * (i == 0 ? 1 : -1));
-        LOGFMTD("Observation[%d]: base angular velocity[%d]: %f", i + 3, i, angular_vel[i]);
-    }
+        for(int i = 0; i < N_LEG_JOINTS; i++) {
+            tmp_obs.push_back(1.0 * q[6 + N_HAND_JOINTS + i]); // full scale leg joint position
+            LOGFMTD("Observation[%d]: joint_%d (%s) position: %f", i + 5 , N_HAND_JOINTS + i, joint_table[N_HAND_JOINTS + i].c_str(), q[6 + N_HAND_JOINTS + i]);
+        } // +12 = [17]
+        
+        
+        for(int i = 0; i < N_LEG_JOINTS; i++) {
+            tmp_obs.push_back(0.05 * clip(v[6 + N_HAND_JOINTS + i], -14., 14.)); // 0.05 scale and clip the leg joint velocity
+            LOGFMTD("Observation[%d]: joint_%d (%s) velocity: %f", i + 17 , N_HAND_JOINTS + i, joint_table[N_HAND_JOINTS + i].c_str(), v[6 + N_HAND_JOINTS + i]);
+        } // +12 = [29]
 
-    for(int i = 0; i < 3; i++) // +3 = [9]
-    {
-        tmp_obs.push_back(proj_grav[i]);
-        LOGFMTD("Observation[%d]: base projected gravity[%d]: %f", i + 6, i, proj_grav[i]);
-    }
-    
-    tmp_obs.push_back(local_cmd.x); // +1 = [10]
-    LOGFMTD("Observation[%d]: user command linear_vel_x: %f", 9, local_cmd.x);
-    tmp_obs.push_back(local_cmd.y); // +1 = [11]
-    LOGFMTD("Observation[%d]: user command linear_vel_y: %f", 10, local_cmd.y);
-    tmp_obs.push_back(target_yaw_angular); // +1 = [12]
-    LOGFMTD("Observation[%d]: user command target_yaw_angular: %f", 11, target_yaw_angular);
-    
-    std::vector<size_t> skip_indices = {0, 1, 2, 3, 4, 5, 7+6, 8+6, 17+6};
-    const size_t joint_index_map[] = {
-        0, 1, 2, 3, 4, 5, 6,  // 0-6
-        9, 10, 11, 12, 13, 14, 15, 16,  // skip 7,8
-        18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29  // skip 17
-    };
-    
-    for (size_t i = 0; i < q.size(); i++) {
-        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
-            continue; // skip current element
+        for(int i = 0; i < N_LEG_JOINTS; i++) {
+            tmp_obs.push_back(last_action[i]);
+            LOGFMTD("Observation[%d]: joint_%d (%s) last_action: %f", i + 29 , N_HAND_JOINTS + i, joint_table[N_HAND_JOINTS + i].c_str(), last_action[i]);
+        } // +12 = [41]
+
+        for(int i = 0; i < 3; i++) // +3 = [44]
+        {
+            tmp_obs.push_back(angular_vel[i] * (i > 0 ? 1 : -1)); // angular velocity from imu callback
+            LOGFMTD("Observation[%d]: base angular velocity[%d]: %f", i + 41, i, angular_vel[i]);
         }
-        tmp_obs.push_back(q[i]);
-        LOGFMTD("Observation[%ld]: joint_%ld (%s) position: %f", i + 12, i - 6, joint_table[i - 6].c_str() ,q[i]);
-    } // +27 = [39]
-    for (size_t i = 0; i < v.size(); i++) {
-        if (std::find(skip_indices.begin(), skip_indices.end(), i) != skip_indices.end()) {
-            continue; // skip current element
-        }
-        tmp_obs.push_back(v[i]);
-        LOGFMTD("Observation[%ld]: joint_%ld (%s) velocity: %f", i + 39, i - 6, joint_table[i - 6].c_str() ,v[i]);
-    } // +27 = [66]
-    for (size_t i = 0; i < last_action.size(); i++) {
-        tmp_obs.push_back(last_action[i]);
-        size_t joint_index = joint_index_map[i];
-        LOGFMTD("Observation[%ld]: joint_%ld (%s) last_action: %f", i + 66, i, joint_table[joint_index].c_str(), last_action[i]);
-    } // +27 = [93]
+        
+        tmp_obs.push_back(euler.roll); // +1 = [45]
+        LOGFMTD("Observation[%d]: base euler angle roll: %f", 44, euler.roll);
+        tmp_obs.push_back(-1.0 * euler.pitch); // +1 = [46]
+        LOGFMTD("Observation[%d]: base euler angle pitch: %f", 45, -1.0 * euler.pitch);
+        tmp_obs.push_back(-1.0 * euler.yaw - base_yaw); // +1 = [47]
+        LOGFMTD("Observation[%d]: base euler angle yaw: %f", 46, (-1.0 * euler.yaw - base_yaw));
+    }
 
-    LOGFMTD("tmp_obs's final size: %ld", tmp_obs.size());
+    LOGFMTD("tmp_observation's final size: %ld", tmp_obs.size());
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
 
     return tmp_obs;
@@ -569,7 +569,6 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
     measured_tau_.clear();
 
     LOGFMTD("Received data size: %lu", msg->data.size());
-    std::lock_guard<std::mutex> lock(data_mutex);
     // position, velocity, torque
     measured_q_.assign(msg->data.begin(), msg->data.begin() + total_joints);
     LOGFMTD("Assigned measured_q_'s size: %ld", measured_q_.size());
@@ -584,16 +583,22 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
     std::copy(msg->data.begin() + 3 * total_joints, msg->data.begin() + 3 * total_joints + quat_size,
               quat_est_.begin()); // 使用 quat_est_.begin() 作为输出迭代器
 
+    LOGFMTD("Received quaternion: (%f, %f, %f, %f)", quat_est_[0], quat_est_[1], quat_est_[2], quat_est_[3]);
+
     // decode angular velocity
     std::copy(msg->data.begin() + 3 * total_joints + quat_size,
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               angular_vel_.begin()); // use angular_vel_.begin() as output iterator
+
+    LOGFMTD("Received angular velocity: (%f, %f, %f)", angular_vel_[0], angular_vel_[1], angular_vel_[2]);
 
     // decode imu linear acceleration
     std::copy(msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size,
               msg->data.begin() + 3 * total_joints + quat_size + angular_vel_size + imu_accel_size,
               imu_accel_.begin()); // use imu_accel_.begin() as output iterator
     
+    LOGFMTD("Received imu_accel: (%f, %f, %f)", imu_accel_[0], imu_accel_[1], imu_accel_[2]);
+
     // LOGE("Callback function!");
     if(measured_q_.empty() || measured_v_.empty() || measured_tau_.empty()) {
         LOGE("Callback function Error!!!!!!!!!!!!!");
@@ -609,7 +614,7 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
     double dt = (current_time - last_time).toSec(); // calculate the time diff
     LOGFMTD("Time diff aka (current_time - last_time): %f", dt);
     last_time = current_time; // update the last time
-    LOGFMTD("Received imu_accel: (%f, %f, %f)", imu_accel_[0], imu_accel_[1], imu_accel_[2]);
+    // LOGFMTD("Received imu_accel: (%f, %f, %f)", imu_accel_[0], imu_accel_[1], imu_accel_[2]);
     // gravity compensation for IMU acceleration
     std::array<double, 3> acceleration_corrected = {
         imu_accel_[0] + imu_bias_[0],
@@ -622,21 +627,22 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
         velocity_[i] += acceleration_corrected[i] * dt;
     }
 
+    LOGFMTD("After integration, get velocity_[0]: %f, velocity_[1]: %f, velocity_[2]: %f", velocity_[0], velocity_[1], velocity_[2]);
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);
     return;
 }
 
 int main(int argc, char **argv)
 {
-    // log4z
-    common_tools::clean_log_files(5);
+    // log4z  
     ILog4zManager::getRef().start();
     ILog4zManager::getRef().setLoggerLevel(LOG4Z_MAIN_LOGGER_ID, LOG_LEVEL_DEBUG);
 
     printf_program("Humanoid Policy Inference: for humanoid robot velocity rl policy inference on Xbot-L robot.");
     common_tools::printf_software_version("Humanoid Policy Inference");
     common_tools::dump_program_info_log4z("Humanoid Policy Inference");
-    
+    common_tools::clean_log_files(5);
+
     ros::init(argc, argv, "humanoid_policy_inference");
     ros::NodeHandle nh;
 
@@ -689,43 +695,45 @@ int main(int argc, char **argv)
     // model_path, obs_dim, action_dim, history_length, obs_history_length
     
     HumanoidPolicy policy(config.model_path, config.obs_dim, config.action_dim, config.history_length, config.obs_history_length);
-    bool warm_up = false;
-    while(!warm_up)
-    {   
-        size_t current_obs_length = policy.get_CurrentObsLength();
-        if(current_obs_length >= static_cast<size_t>(config.obs_history_length))
-        {
-            warm_up = true;
-            LOGFMTI("Policy inference warm up finished, current observation history size: %ld", current_obs_length);
-        } else {
-            std::vector<float> obs(config.obs_dim, 0.0f);
-        auto output = policy.inference(obs);
-        LOGFMTD("Warm up policy inference, observation history size: %ld", current_obs_length);
-        } 
-    }
+    // bool warm_up = false;
+    // while(!warm_up)
+    // {   
+    //     size_t current_obs_length = policy.get_CurrentObsLength();
+    //     if(current_obs_length >= static_cast<size_t>(config.obs_history_length))
+    //     {
+    //         warm_up = true;
+    //         LOGFMTI("Policy inference warm up finished, current observation history size: %ld", current_obs_length);
+    //     } else {
+    //         std::vector<float> obs(config.obs_dim, 0.0f);
+    //         auto output = policy.inference(obs);
+    //         LOGFMTD("Warm up policy inference, observation history size: %ld", current_obs_length);
+    //     }
+    // }
 
     std::thread inputThread(handleInput, config.lin_sensitivity, config.ang_sensitivity);
     std::vector<double> pos_des, vel_des, kp, kd, torque; // configure for the joint control parameters
     std::vector<float> current_obs; // current observation
-    std::vector<float> last_action(27, 0.0f);
-    std::vector<float> action(27, 0.0f);
+    std::vector<float> last_action(config.action_dim, 0.0f);
+    std::vector<float> action(config.action_dim, 0.0f);
 
     unsigned long cycle_count = 0;
     constexpr unsigned long startup_cycle = 100;
     constexpr unsigned long init_cycle = 500;
     constexpr unsigned long MAXCYCLE = 720000; // 2 hours
+    
     bool initFlag = false;
     std_msgs::Float64MultiArray control_msg;
 
     // transition switch parameters
     bool is_transitioning = false;
     unsigned long transition_start_cycle = 0;
-    constexpr unsigned long transition_duration = 1500; // 15s（control frequency 100Hz）
+    constexpr unsigned long transition_duration = 500; // 5s（control frequency 100Hz）
     std::vector<double> init_pos;
     std::vector<double> stand_pos;
     while(ros::ok())
     {   
-        static std::vector<double> default_pos;
+        // static std::vector<double> default_pos;
+        static unsigned long start_to_walk_cycle;
         // reset the joint control parameters
         pos_des.resize(N_JOINTS);
         vel_des.resize(N_JOINTS);
@@ -735,28 +743,19 @@ int main(int argc, char **argv)
 
         current_obs.clear(); // reset the current observation
         action.clear(); // reset the action
+        
+        cycle_count++; // increase the cycle count
+        LOGFMTD("Current cycle count: %ld", cycle_count);
         auto start_time = std::chrono::steady_clock::now();
 
         auto current_state = state_machine.getCurrentState(); // get the current state
         LOGFMTI("Current state machine is: %s", state_machine.stateToString(current_state).c_str());
         // wait until measured_data are not empty
-        last_action = policy.get_LastAction(); // get the last action
-        try {
-            current_obs = get_current_obs(init_pos, last_action);
-            // get the current observation
-        } catch(const std::runtime_error &e) {
-            LOGE("ERROR in get_current_obs()!!");
-            std::this_thread::sleep_for(std::chrono::milliseconds(2)); // wait for 2 ms
-            ros::spinOnce();
-            continue; // jump out of the current loop
-            // error in get_current_obs
-        }
-        cycle_count++; // increase the cycle count
         
-        // LOGFMTD("Current observation size: %lu", current_obs.size());
-        if(initFlag && (current_obs[8] > -0.8)) // current_robot_state error
+        if(initFlag && (proj_grav_[2] > -0.8)) // current_robot_state error
         {
             LOGE("Robot state error: send joint command as shown below:");
+            LOGFMTD("Project gravity z: %f", proj_grav_[2]);
             for (int i = 0; i < N_JOINTS; i++)
             {
                 pos_des[i] = 0.0;  // target zero position
@@ -775,7 +774,13 @@ int main(int argc, char **argv)
         }
 
         if(cycle_count <= startup_cycle && !initFlag) {
-            default_pos = measured_q_;
+            init_pos = measured_q_;
+            LOGFMTD("In init loop: Before quaternion to euler, quat(w, x, y, z): %f, %f, %f, %f", quat_est_[0], quat_est_[1], quat_est_[2], quat_est_[3]);
+            EulerAngle euler = QuaternionToEuler(Quaternion{ quat_est_[0], quat_est_[1], quat_est_[2], quat_est_[3] }); // convert quaternion to euler angle
+            LOGFMTD("In init loop: After quaternion to euler, euler: %f, %f, %f", euler.roll, euler.pitch, euler.yaw);
+            hist_yaw_.push_back(euler.yaw * -1.0);
+            if(hist_yaw_.size() >= HIST_YAW_SIZE)
+                hist_yaw_.pop_front();
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
             LOGFMTI("In startup loop, time cycle: %ld", cycle_count);
@@ -783,8 +788,6 @@ int main(int argc, char **argv)
             auto duration = std::chrono::steady_clock::now() - start_time;
             auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
             int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
-            // LOGFMTW("Sleep time: %d us", sleep_time);
-            duration = std::chrono::steady_clock::now() - start_time;
             LOGFMTA("Startup loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
             std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
             ros::spinOnce();
@@ -794,7 +797,7 @@ int main(int argc, char **argv)
             double percentange = double(cycle_count - startup_cycle) / (init_cycle - startup_cycle);
             for(int i = 0; i < N_HAND_JOINTS; i++)
             {
-                pos_des[i] = default_pos[6 + i] + percentange * (0.0 - default_pos[6 + i]);
+                pos_des[i] = init_pos[6 + i] + percentange * (0.0 - init_pos[6 + i]);
                 vel_des[i] = 0.0;
                 kp[i] = 200.0;
                 kd[i] = 10.0;
@@ -803,7 +806,7 @@ int main(int argc, char **argv)
             // lower body init to damping mode
             for(int i = 0; i < N_LEG_JOINTS; i++)
             {
-                pos_des[N_HAND_JOINTS + i] = default_pos[6 + N_HAND_JOINTS + i] + percentange * (0.0 - default_pos[6 + N_HAND_JOINTS + i]);
+                pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + percentange * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
                 vel_des[N_HAND_JOINTS + i] = 0.0;
                 kp[N_HAND_JOINTS + i] = 300.0;
                 kd[N_HAND_JOINTS + i] = 10.0;
@@ -816,15 +819,14 @@ int main(int argc, char **argv)
             auto duration = std::chrono::steady_clock::now() - start_time;
             auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
             int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
-            // LOGFMTW("Sleep time: %d us", sleep_time);
-            duration = std::chrono::steady_clock::now() - start_time;
             LOGFMTA("Init loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
             std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
             ros::spinOnce();
             continue;
         } else if(cycle_count > init_cycle && !initFlag) {
             initFlag = true;
-            LOGFMTI("Initialization finished in %ld cycles!", cycle_count);
+            LOGFMTI("Initialization finished in %ld cycles!", cycle_count - 1);
+            LOGFMTI("Begin while loop at time cycle: %ld", cycle_count);
         }
 
         if(cycle_count >= MAXCYCLE)
@@ -958,83 +960,166 @@ int main(int argc, char **argv)
                 case HumanoidStateMachine::WALK:
                     // WALK STATE LOGIC
                     LOGI("WALK state logic...");
+                    if(start_to_walk_cycle == 0)
+                    {
+                        start_to_walk_cycle = cycle_count;
+                        LOGFMTI("Start to walk cycle: %ld", start_to_walk_cycle);
+                    }
                     // How to get current_obs
-                    action = policy.inference(current_obs); // action is a vector of float 27 dim
-                    for(size_t i = 0; i < action.size(); i++)
+                    // get the last action
+                    last_action = policy.get_LastAction();
+                    for(size_t i = 0; i < last_action.size(); i++)
                     {
-                        action[i] = std::min(MAX_CLIP, std::max(MIN_CLIP, action[i]));
+                        LOGFMTD("Before get current obs, print last action[%ld]: %f", i, last_action[i]);
                     }
-                    // std::vector<size_t> upperbody_skip_indices = { 7, 8, 17 };
-                    action.insert(action.begin() + 17, 0); // 在位置17插入0 WAIST_ROLL_JOINT
-                    action.insert(action.begin() + 8, 0);  // 在位置8插入0 NECK_PITCH_JOINT
-                    action.insert(action.begin() + 7, 0);  // 在位置7插入0 NECK_YAW_JOINT
-
-                    for(int i = 0; i < N_HAND_JOINTS; i++)
-                    {
-                        // get the joint limits from the default_joints config
-                        double upper_limit = default_joints[i].upper_limit;
-                        double lower_limit = default_joints[i].lower_limit;
-                        
-                        // scale the action by 0.3 factor
-                        double raw_des_pos = 0.3 * action[i];
-
-                        // check if the raw_des_pos is out of bounds and 
-                        if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
-                            LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", i, default_joints[i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
+                    try {
+                        if(config.action_dim == 27){
+                            current_obs = get_current_obs(init_pos, last_action); // get the current observation [93] policy_test.pt
+                        } else {
+                            current_obs = get_current_obs(init_pos, last_action, cycle_count, start_to_walk_cycle, true); // get the current observation [47] policy_1.pt
                         }
-                        // clip the raw_des_pos to the joint limits
-                        pos_des[i] = clip(raw_des_pos, lower_limit, upper_limit);
-                        LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", i, pos_des[i], lower_limit, upper_limit);
-
-                        vel_des[i] = 0.0;
-                        kp[i] = 300.0;
-                        kd[i] = 20.0;
-                        torque[i] = 0.0;
-                        if(i == 16 || i == 17)
+                    } catch(const std::runtime_error &e) {
+                        LOGE("ERROR in get_current_obs()!!"); 
+                        // LOGFMTI("In main while loop, time cycle: %ld", cycle_count);
+                        auto duration = std::chrono::steady_clock::now() - start_time;
+                        auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+                        int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
+                        LOGFMTA("Startup loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+                        std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+                        ros::spinOnce();
+                        continue;
+                    }
+                    
+                    if(config.action_dim == 27) {
+                        action = policy.inference(current_obs); // action is a vector of float 27 dim
+                        policy.update_History(current_obs, action); // update the history
+                    
+                        for(size_t i = 0; i < action.size(); i++)
                         {
-                            kp[i] = 200.0; 
-                            kd[i] = 40.0;
+                            action[i] = std::min(MAX_CLIP, std::max(MIN_CLIP, action[i]));
                         }
-                    }
-                    // lower body init to damping mode
-                    for(int i = 0; i < N_LEG_JOINTS; i++)
-                    {
-                        // get the joint limits from the default_joints config
-                        double upper_limit = default_joints[N_HAND_JOINTS + i].upper_limit;
-                        double lower_limit = default_joints[N_HAND_JOINTS + i].lower_limit;
-                        // scale the action by 0.3 factor
-                        double raw_des_pos = 0.3 * action[N_HAND_JOINTS + i];
-                        // check if the raw_des_pos is out of bounds and
-                        if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
-                            LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", N_HAND_JOINTS + i, default_joints[N_HAND_JOINTS + i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
+                        // std::vector<size_t> upperbody_skip_indices = { 7, 8, 17 };
+                        action.insert(action.begin() + 17, 0); // 在位置17插入0 WAIST_ROLL_JOINT
+                        action.insert(action.begin() + 8, 0);  // 在位置8插入0 NECK_PITCH_JOINT
+                        action.insert(action.begin() + 7, 0);  // 在位置7插入0 NECK_YAW_JOINT
+
+                        for(int i = 0; i < N_HAND_JOINTS; i++)
+                        {
+                            // get the joint limits from the default_joints config
+                            double upper_limit = default_joints[i].upper_limit;
+                            double lower_limit = default_joints[i].lower_limit;
+                            
+                            // scale the action by 0.3 factor
+                            double raw_des_pos = 0.3 * action[i];
+
+                            // check if the raw_des_pos is out of bounds and 
+                            if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
+                                LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", i, default_joints[i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
+                            }
+                            // clip the raw_des_pos to the joint limits
+                            pos_des[i] = clip(raw_des_pos, lower_limit, upper_limit);
+                            LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", i, pos_des[i], lower_limit, upper_limit);
+
+                            vel_des[i] = 0.0;
+                            kp[i] = 300.0;
+                            kd[i] = 20.0;
+                            torque[i] = 0.0;
+                            if(i == 16 || i == 17)
+                            {
+                                kp[i] = 200.0; 
+                                kd[i] = 40.0;
+                            }
                         }
-                        // clip the raw_des_pos to the joint limits
-                        pos_des[N_HAND_JOINTS + i] = clip(raw_des_pos, lower_limit, upper_limit);
-                        LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", N_HAND_JOINTS + i, pos_des[N_HAND_JOINTS + i], lower_limit, upper_limit);
-                        vel_des[N_HAND_JOINTS + i] = 0.0;
-                        kp[N_HAND_JOINTS + i] = 200.0;
-                        kd[N_HAND_JOINTS + i] = 10.0;
-                        torque[N_HAND_JOINTS + i] = 0.0;
-                    }
-                    // left_leg_pitch_joint && right_leg_pitch_joint
-                    for(int i :{20 ,26})
-                    {
-                        kp[i] = 350.0;
-                    }
-                    // left_knee_joint && right_knee_joint
-                    for(int i :{21, 27})
-                    {
-                        kp[i] = 350.0;
-                    }
-                    // foot ankle joints
-                    for(int i :{22, 23, 28, 29})
-                    {
-                        kp[i] = 15.0;
-                    }
-                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
-                    for(size_t i = 0; i < control_msg.data.size(); i++)
-                    {
-                        LOGFMTD("Control_msg[%lu]: %f", i, control_msg.data[i]);
+                        // lower body init to damping mode
+                        for(int i = 0; i < N_LEG_JOINTS; i++)
+                        {
+                            // get the joint limits from the default_joints config
+                            double upper_limit = default_joints[N_HAND_JOINTS + i].upper_limit;
+                            double lower_limit = default_joints[N_HAND_JOINTS + i].lower_limit;
+                            // scale the action by 0.3 factor
+                            double raw_des_pos = 0.3 * action[N_HAND_JOINTS + i];
+                            // check if the raw_des_pos is out of bounds and
+                            if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
+                                LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", N_HAND_JOINTS + i, default_joints[N_HAND_JOINTS + i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
+                            }
+                            // clip the raw_des_pos to the joint limits
+                            pos_des[N_HAND_JOINTS + i] = clip(raw_des_pos, lower_limit, upper_limit);
+                            LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", N_HAND_JOINTS + i, pos_des[N_HAND_JOINTS + i], lower_limit, upper_limit);
+                            vel_des[N_HAND_JOINTS + i] = 0.0;
+                            kp[N_HAND_JOINTS + i] = 200.0;
+                            kd[N_HAND_JOINTS + i] = 10.0;
+                            torque[N_HAND_JOINTS + i] = 0.0;
+                        }
+                        // left_leg_pitch_joint && right_leg_pitch_joint
+                        for(int i :{20 ,26})
+                        {
+                            kp[i] = 350.0;
+                        }
+                        // left_knee_joint && right_knee_joint
+                        for(int i :{21, 27})
+                        {
+                            kp[i] = 350.0;
+                        }
+                        // foot ankle joints
+                        for(int i :{22, 23, 28, 29})
+                        {
+                            kp[i] = 15.0;
+                        }
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        for(size_t i = 0; i < action.size(); i++)
+                        {
+                            LOGFMTD("Action[%lu] output: %f", i, action[i]);
+                        }
+                    } else {
+                        // action dim 12
+                        action = policy.inference(current_obs, true); // action is a vector of float 12 dim
+                        // policy.set_LastAction(action); // update the last action
+                        for(size_t i = 0; i < action.size(); i++)
+                        {
+                            action[i] = std::min(MAX_CLIP, std::max(MIN_CLIP, action[i]));
+                        }
+                        policy.set_LastAction(action); // update the last action
+                        // upper body joint control
+                        for (int i = 0; i < N_HAND_JOINTS; i++)
+                        {
+                            kp[i] = 200.0;
+                            kd[i] = 10.0;
+                            pos_des[i] = 0.0;
+                            vel_des[i] = 0.0;
+                            torque[i] = 0.0;
+                            // waist joint control
+                            if (i == 16 || i == 17)
+                            {
+                            kp[i] = 400.0;
+                            kd[i] = 10.0;
+                            }
+                        }
+                        // leg joint control
+                        for (int i = 0; i < N_LEG_JOINTS; i++)
+                        {
+                            kp[N_HAND_JOINTS + i] = 200.0;
+                            kd[N_HAND_JOINTS + i] = 10.0;
+                            pos_des[N_HAND_JOINTS + i] = 0.3 * last_action[i];
+                            vel_des[N_HAND_JOINTS + i] = 0.0;
+                            torque[N_HAND_JOINTS + i] = 0.0;
+                        }
+                        // elbow joint control
+                        for (int i : {4, 5, 10, 11})
+                        {
+                            kp[N_HAND_JOINTS + i] = 15.0;
+                            kd[N_HAND_JOINTS + i] = 10.0;
+                        }
+                        // shoulder joint control
+                        for (int i : {2, 3, 8, 9})
+                        {
+                            kp[N_HAND_JOINTS + i] = 350.0;
+                            kd[N_HAND_JOINTS + i] = 10.0;
+                        }
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        for(size_t i = 0; i < action.size(); i++)
+                        {
+                            LOGFMTD("Action[%lu] output: %f", i, action[i]);
+                        }
                     }
                     // pub.publish(control_msg);
                     LOGW("WALK mode, keep sending policy output command.");
@@ -1047,13 +1132,15 @@ int main(int argc, char **argv)
         }
         
         auto duration = std::chrono::steady_clock::now() - start_time;
-        if(current_state == HumanoidStateMachine::WALK)
-            LOGFMTW("Inference time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
         auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+        if(current_state == HumanoidStateMachine::WALK) {
+            LOGFMTA("The whole inference time: %ld us", micro_sec);
+        }
+        else {
+            LOGFMTA("The whole cycle process time: %ld us", micro_sec);
+        }
         int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
-        // LOGFMTW("Sleep time: %d us", sleep_time);
-        duration = std::chrono::steady_clock::now() - start_time;
-        LOGFMTA("Cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+        LOGFMTW("Cycle sleep time: %d us", sleep_time);
         std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
         ros::spinOnce();
     }

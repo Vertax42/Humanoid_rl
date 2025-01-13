@@ -12,6 +12,7 @@ constexpr int N_LEG_JOINTS = 12;  // left leg(6) + right leg(6)
 constexpr std::array<double, 3> gravity = { 0.0, 0.0, -0.981 }; // gravity vector
 constexpr float MAX_CLIP = 18.0;
 constexpr float MIN_CLIP = -18.0;
+constexpr size_t HIST_YAW_SIZE = 50;
 
 std_msgs::Float64MultiArray BodyJointCommandWraper(std::vector<double> &pos_des, std::vector<double> &vel_des, std::vector<double> &kp, std::vector<double> &kd, std::vector<double> &torque);
 

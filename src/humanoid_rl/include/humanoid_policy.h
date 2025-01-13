@@ -23,6 +23,9 @@ public:
     // record history observation
     size_t record_ObsHistory(const std::vector<float>& observation);
 
+    // set last action
+    void set_LastAction(const std::vector<float> action);
+
     // get history observation and last action
     const std::deque<std::vector<float>>& get_ObsHistory() const;
     const std::vector<float>& get_LastAction() const;
@@ -48,7 +51,7 @@ private:
     // history of observations and actions
     std::deque<std::vector<float>> _obs_history;
     std::vector<float> _last_action;
-
+public:
     // update history
     void update_History(const std::vector<float>& obs, const std::vector<float>& action);
 };

@@ -100,9 +100,9 @@ inline void printf_software_version(const std::string &s)
     std::cout << "Here is the software environment infos: " << std::endl;
     std::cout << "Software name            : " << ANSI_COLOR_RED_BOLD << s << ANSI_COLOR_GREEN_BOLD << std::endl;
 
-#ifdef CIRCLE_DETECTION_MAJOR // Has Circle detection
-    std::cout << "Circle_Detection version : " << CIRCLE_DETECTION_MAJOR << "." << CIRCLE_DETECTION_MINOR << "."
-              << CIRCLE_DETECTION_PATCH << "." << CIRCLE_DETECTION_BUILD << std::endl;
+#ifdef HUMANOID_RL_VERSION_STRING // Has Humanoid_rl
+    std::cout << "Humanoid_rl version : " << HUMANOID_RL_MAJOR << "." << HUMANOID_RL_MINOR << "."
+              << HUMANOID_RL_PATCH << "." << HUMANOID_RL_BUILD << std::endl;
 #endif
 
 // #ifdef __GNUC__ &&__GNUC_MINOR__ &&__GNUC_PATCHLEVEL__

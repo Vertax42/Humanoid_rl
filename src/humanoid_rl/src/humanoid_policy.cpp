@@ -42,35 +42,31 @@ std::vector<float> HumanoidPolicy::inference(const std::vector<float>& observati
         throw std::invalid_argument("Invalid observation size.");
     }
 
+    torch::Tensor input_tensor;
     if(with_history) {
-        torch::Tensor input_tensor = torch::zeros({_obs_dim * _obs_history_length}, torch::kFloat32); // [47 x 15] [705]
+        input_tensor = torch::zeros({static_cast<int64_t>(_obs_dim * _obs_history_length)}, torch::kFloat32); // [47 x 15] [705]
         _obs_history.push_back(observation); // only update observation history
         _obs_history.pop_front(); // pop the front element
         // flatten observation history
         for (size_t i = 0; i < _obs_history.size(); i++) {
             for (size_t j = 0; j < _obs_dim; j++) {
-                input_tensor.index_put_({i * (int)_obs_history[0].size() + j}, _obs_history[i][j]);
+                input_tensor.index_put_({static_cast<int64_t>(i * _obs_history[0].size() + j)}, _obs_history[i][j]);
             }
         }
         LOGFMTD("After flatten observation history, input_tensor size: %ld", input_tensor.size(0));
     } else {
         // convert observation to tensor, add batch dimension
-        torch::Tensor input_tensor = torch::tensor(observation, torch::kFloat32).unsqueeze(0).contiguous(); // [1, obs_dim] [1, 93]
+        input_tensor = torch::tensor(observation, torch::kFloat32).unsqueeze(0).contiguous(); // [1, obs_dim] [1, 93]
     }
     
     // observation tensor preprocessing
     
     // get action tensor
-    torch::Tensor action_tensor = _model.forward({input_tensor}).toTensor(); // [1, action_dim] [1, 27]
+    torch::Tensor action_tensor = _model.forward({input_tensor}).toTensor(); // [1, action_dim] [1, 27] / [1, 12]
     // convert action tensor to vector
     std::vector<float> action(_action_dim);
     std::memcpy(action.data(), action_tensor.data_ptr(), _action_dim * sizeof(float));
-    // update history
-    if(with_history) {
-        _last_action = action; // because the observation history has been updated
-    } else {
-        update_History(observation, action);
-    }
+    
     // update_History(observation, action);
     return action;
 }
@@ -82,6 +78,14 @@ size_t HumanoidPolicy::record_ObsHistory(const std::vector<float>& observation){
         _obs_history.pop_front();
     }
     return _obs_history.size();
+}
+
+void HumanoidPolicy::set_LastAction(const std::vector<float> action) {
+    if (action.size() != _action_dim) {
+        throw std::invalid_argument("Action size mismatch: expected " + std::to_string(_action_dim) + ", got " + std::to_string(action.size()));
+    }
+    _last_action = action;
+    return;
 }
 
 // get history observation
