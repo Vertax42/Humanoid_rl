@@ -35,6 +35,7 @@ std::array<double, 3> imu_bias_; // bias of the imu
 std::array<double, 3> proj_grav_ = {0.0, 0.0, -0.981};// projected gravity z-axis
 ros::Time last_time;
 // <<< for callback function
+std::vector<torch::jit::IValue> tensor;
 
 struct Command {
     // 1 for moving, 0 for standing used for yaw while stand
