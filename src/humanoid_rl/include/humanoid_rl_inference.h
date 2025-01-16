@@ -63,6 +63,8 @@ EulerAngle QuaternionToEuler(const Quaternion &q);
 
 std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, const std::array<double, 3> &vel);
 
+bool is_valid_joint(std::vector<double> &measured_q, std::vector<JointConfig> &default_joint, float scale);
+
 std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action);
 
 std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action, double cycle_count, double start_to_walk_cycle, bool with_history);

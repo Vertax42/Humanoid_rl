@@ -279,6 +279,26 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
              vz * tmp1 - (x * vy - y * vx) * tmp2 + z * tmp3 };
 }
 
+bool is_valid_joint(std::vector<double> &measured_q, std::vector<JointConfig> &default_joint, float scale)
+{
+    if(measured_q.size() != 30)
+    {
+        LOGE("Measured joint position size is not 30!");
+        return false;
+    }
+
+    for(size_t i = 0; i < measured_q.size(); ++i)
+    {
+        if(measured_q[i] < default_joint[i].lower_limit * scale || measured_q[i] > default_joint[i].upper_limit * scale)
+        {
+            LOGFMTD("Joint %s is out of range: %f", default_joint[i].name.c_str(), measured_q[i]);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action)
 {
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, false);
@@ -663,9 +683,9 @@ int main(int argc, char **argv)
     }
     
     // testing output
-    for (size_t i = 0; i < joint_table.size(); i++) {
-        LOGFMTD("Joint_table ID: %ld, Joint_table Name: %s", i, joint_table[i].c_str());
-    }
+    // for (size_t i = 0; i < joint_table.size(); i++) {
+    //     LOGFMTD("Joint_table ID: %ld, Joint_table Name: %s", i, joint_table[i].c_str());
+    // }
 
     ModelConfig config;
     if(loadModelConfig(nh, config))
@@ -753,10 +773,17 @@ int main(int argc, char **argv)
         LOGFMTI("Current state machine is: %s", state_machine.stateToString(current_state).c_str());
         // wait until measured_data are not empty
         
-        if(initFlag && (proj_grav_[2] > -0.8)) // current_robot_state error
+        if((initFlag && (proj_grav_[2] > -0.8)) || is_valid_joint(measured_q_, default_joints, 0.8))// current_robot_state error
         {
+            if(proj_grav_[2] > -0.8) {
+                LOGFMTE("Project gravity z: %f", proj_grav_[2]);
+                LOGFMTE("Robot state error: robot is not standing on the ground! Robot shutdown!");
+            } else {
+                LOGE("Robot state error: measured_q_ is invalid!");
+                LOGE("Observed joint position reach limits! Robot shutdown!");
+            }
             LOGE("Robot state error: send joint command as shown below:");
-            LOGFMTD("Project gravity z: %f", proj_grav_[2]);
+            
             for (int i = 0; i < N_JOINTS; i++)
             {
                 pos_des[i] = 0.0;  // target zero position
@@ -1006,25 +1033,12 @@ int main(int argc, char **argv)
 
                         for(int i = 0; i < N_HAND_JOINTS; i++)
                         {
-                            // get the joint limits from the default_joints config
-                            double upper_limit = default_joints[i].upper_limit;
-                            double lower_limit = default_joints[i].lower_limit;
-                            
-                            // scale the action by 0.3 factor
-                            double raw_des_pos = 0.3 * action[i];
-
-                            // check if the raw_des_pos is out of bounds and 
-                            if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
-                                LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", i, default_joints[i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
-                            }
-                            // clip the raw_des_pos to the joint limits
-                            pos_des[i] = clip(raw_des_pos, lower_limit, upper_limit);
-                            LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", i, pos_des[i], lower_limit, upper_limit);
-
-                            vel_des[i] = 0.0;
                             kp[i] = 300.0;
                             kd[i] = 20.0;
                             torque[i] = 0.0;
+                            pos_des[i] = action[i] * 0.3;
+                            vel_des[i] = 0.0;
+
                             if(i == 16 || i == 17)
                             {
                                 kp[i] = 200.0; 
@@ -1034,22 +1048,11 @@ int main(int argc, char **argv)
                         // lower body init to damping mode
                         for(int i = 0; i < N_LEG_JOINTS; i++)
                         {
-                            // get the joint limits from the default_joints config
-                            double upper_limit = default_joints[N_HAND_JOINTS + i].upper_limit;
-                            double lower_limit = default_joints[N_HAND_JOINTS + i].lower_limit;
-                            // scale the action by 0.3 factor
-                            double raw_des_pos = 0.3 * action[N_HAND_JOINTS + i];
-                            // check if the raw_des_pos is out of bounds and
-                            if (raw_des_pos > upper_limit || raw_des_pos < lower_limit) {
-                                LOGFMTW("Joint %d (%s) desired position out of bounds: raw_des_pos = %f, limits = [%f, %f]", N_HAND_JOINTS + i, default_joints[N_HAND_JOINTS + i].name.c_str(), raw_des_pos, lower_limit, upper_limit);
-                            }
-                            // clip the raw_des_pos to the joint limits
-                            pos_des[N_HAND_JOINTS + i] = clip(raw_des_pos, lower_limit, upper_limit);
-                            LOGFMTD("Cliped and scaled Action[%d]: %f (limits: [%f, %f])", N_HAND_JOINTS + i, pos_des[N_HAND_JOINTS + i], lower_limit, upper_limit);
-                            vel_des[N_HAND_JOINTS + i] = 0.0;
                             kp[N_HAND_JOINTS + i] = 200.0;
                             kd[N_HAND_JOINTS + i] = 10.0;
                             torque[N_HAND_JOINTS + i] = 0.0;
+                            pos_des[i] = action[i] * 0.3;
+                            vel_des[N_HAND_JOINTS + i] = 0.0;
                         }
                         // left_leg_pitch_joint && right_leg_pitch_joint
                         for(int i :{20 ,26})
@@ -1100,7 +1103,12 @@ int main(int argc, char **argv)
                         {
                             kp[N_HAND_JOINTS + i] = 200.0;
                             kd[N_HAND_JOINTS + i] = 10.0;
-                            pos_des[N_HAND_JOINTS + i] = 0.3 * last_action[i];
+                            if(config.action_dim == 27)
+                            {
+                                pos_des[N_HAND_JOINTS + i] = 0.3 * action[i];
+                            } else {
+                                pos_des[N_HAND_JOINTS + i] = 0.25 * action[i];
+                            }
                             vel_des[N_HAND_JOINTS + i] = 0.0;
                             torque[N_HAND_JOINTS + i] = 0.0;
                         }
