@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <std_msgs/Float64MultiArray.h>
+#include <sensor_msgs/JointState.h>
 #include "humanoid_policy.h"
 
 
@@ -31,6 +32,10 @@ struct ModelConfig {
     int obs_history_length;
     double lin_sensitivity;
     double ang_sensitivity;
+    // 观测空间变量名列表
+    std::vector<std::string> obs_names;
+    // 动作关节角列表
+    std::vector<std::string> action_joints;
 };
 
 struct Quaternion {
@@ -70,5 +75,7 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
 std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<float> &last_action, double cycle_count, double start_to_walk_cycle, bool with_history);
 
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg);
+
+void Jointscallback(const sensor_msgs::JointState::ConstPtr &msg);
 
 #endif // HUMANOID_RL_INFERENCE_H

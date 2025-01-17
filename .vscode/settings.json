@@ -1,26 +1,12 @@
 {
-  "C_Cpp_Runner.msvcBatchPath": "",
   "editor.formatOnSave": true,
-  "clang-format.executable": "/usr/bin/clang-format-9",
-  "python.autoComplete.extraPaths": [
-    "/home/xbot/humanoid_rl_ws/devel/lib/python3/dist-packages",
-    "/home/xbot/ros_ws/devel/lib/python3/dist-packages",
-    "/home/xbot/xbot_install/lib/python3/dist-packages",
-    "/opt/ros/noetic/lib/python3/dist-packages",
-    "/usr/local/lib/python3.8/site-packages"
-  ],
-  "python.analysis.extraPaths": [
-    "/home/xbot/humanoid_rl_ws/devel/lib/python3/dist-packages",
-    "/home/xbot/ros_ws/devel/lib/python3/dist-packages",
-    "/home/xbot/xbot_install/lib/python3/dist-packages",
-    "/opt/ros/noetic/lib/python3/dist-packages",
-    "/usr/local/lib/python3.8/site-packages"
-  ],
+  "clang-format.executable": "/usr/bin/clang-format",
   "C_Cpp_Runner.cCompilerPath": "gcc",
   "C_Cpp_Runner.cppCompilerPath": "g++",
   "C_Cpp_Runner.debuggerPath": "gdb",
   "C_Cpp_Runner.cStandard": "",
   "C_Cpp_Runner.cppStandard": "",
+  "C_Cpp_Runner.msvcBatchPath": "",
   "C_Cpp_Runner.useMsvc": false,
   "C_Cpp_Runner.warnings": [
     "-Wall",
@@ -72,5 +58,16 @@
   "C_Cpp_Runner.showCompilationTime": false,
   "C_Cpp_Runner.useLinkTimeOptimization": false,
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
-  "cmake.sourceDirectory": "/home/vertax/Humanoid_rl/src/humanoid_rl"
+  "python.autoComplete.extraPaths": [
+    "/home/vertax/Humanoid_rl/devel/lib/python3/dist-packages",
+    "/home/vertax/catkin_ws/devel/lib/python3/dist-packages",
+    "/home/vertax/ros_ws/devel/lib/python3/dist-packages",
+    "/opt/ros/noetic/lib/python3/dist-packages"
+  ],
+  "python.analysis.extraPaths": [
+    "/home/vertax/Humanoid_rl/devel/lib/python3/dist-packages",
+    "/home/vertax/catkin_ws/devel/lib/python3/dist-packages",
+    "/home/vertax/ros_ws/devel/lib/python3/dist-packages",
+    "/opt/ros/noetic/lib/python3/dist-packages"
+  ]
 }
