@@ -281,17 +281,17 @@ std::array<double, 3> quat_rotate_inverse(const std::array<double, 4> &quat, con
 
 bool is_valid_joint(std::vector<double> &measured_q, std::vector<JointConfig> &default_joint, float scale)
 {
-    if(measured_q.size() != 30)
+    if(measured_q.size() != 36)
     {
-        LOGE("Measured joint position size is not 30!");
+        LOGE("Measured joint position size is not 36!");
         return false;
     }
 
-    for(size_t i = 0; i < measured_q.size(); ++i)
+    for(size_t i = 0; i < N_JOINTS; ++i)
     {
-        if(measured_q[i] < default_joint[i].lower_limit * scale || measured_q[i] > default_joint[i].upper_limit * scale)
+        if(measured_q[i + 6] < default_joint[i].lower_limit * scale || measured_q[i + 6] > default_joint[i].upper_limit * scale)
         {
-            LOGFMTD("Joint %s is out of range: %f", default_joint[i].name.c_str(), measured_q[i]);
+            LOGFMTD("Joint %s is out of range: (%f, %f), current_measurement: %f", default_joint[i].name.c_str(), default_joint[i].lower_limit * scale, default_joint[i].upper_limit * scale, measured_q[i + 6]);
             return false;
         }
     }
@@ -669,6 +669,8 @@ int main(int argc, char **argv)
 
     ros::Publisher pub = nh.advertise<std_msgs::Float64MultiArray>("/policy_input", 1);
     ros::Subscriber sub = nh.subscribe("/controllers/xbot_controller/policy_output", 1, callback, ros::TransportHints().tcpNoDelay());
+    ros::Subscriber joint_states_sub = nh.subscribe("/RXjoint_states", 1, Jointscallback, ros::TransportHints().tcpNoDelay());
+    
     std::this_thread::sleep_for(std::chrono::seconds(3));
  
     std::vector<JointConfig> default_joints;
@@ -773,7 +775,7 @@ int main(int argc, char **argv)
         LOGFMTI("Current state machine is: %s", state_machine.stateToString(current_state).c_str());
         // wait until measured_data are not empty
         
-        if((initFlag && (proj_grav_[2] > -0.8)) || is_valid_joint(measured_q_, default_joints, 0.8))// current_robot_state error
+        if((initFlag && (proj_grav_[2] > -0.8)) || (initFlag && !is_valid_joint(measured_q_, default_joints, 0.8)))// current_robot_state error
         {
             if(proj_grav_[2] > -0.8) {
                 LOGFMTE("Project gravity z: %f", proj_grav_[2]);
@@ -792,7 +794,7 @@ int main(int argc, char **argv)
                 kd[i] = 2.0;       // set damping value 2.0
                 torque[i] = 0.0;   // zero torque
                 // add logs for debug
-                LOGFMTD("Pub joint %d command message: pos_des = %.2f, vel_des = %.2f, kp = %.2f, kd = %.2f, torque = %.2f", i, pos_des[i], vel_des[i], kp[i], kd[i], torque[i]);
+                // LOGFMTD("Pub joint %d command message: pos_des = %.2f, vel_des = %.2f, kp = %.2f, kd = %.2f, torque = %.2f", i, pos_des[i], vel_des[i], kp[i], kd[i], torque[i]);
             }
             control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
             pub.publish(control_msg);
@@ -1072,7 +1074,7 @@ int main(int argc, char **argv)
                         control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
                         for(size_t i = 0; i < action.size(); i++)
                         {
-                            LOGFMTD("Action[%lu] output: %f", i, action[i]);
+                            LOGFMTD("Action[%lu] output by * 0.3: %f", i, action[i] * 0.3);
                         }
                     } else {
                         // action dim 12
@@ -1103,12 +1105,7 @@ int main(int argc, char **argv)
                         {
                             kp[N_HAND_JOINTS + i] = 200.0;
                             kd[N_HAND_JOINTS + i] = 10.0;
-                            if(config.action_dim == 27)
-                            {
-                                pos_des[N_HAND_JOINTS + i] = 0.3 * action[i];
-                            } else {
-                                pos_des[N_HAND_JOINTS + i] = 0.25 * action[i];
-                            }
+                            pos_des[N_HAND_JOINTS + i] = 0.25 * action[i];
                             vel_des[N_HAND_JOINTS + i] = 0.0;
                             torque[N_HAND_JOINTS + i] = 0.0;
                         }
@@ -1127,7 +1124,7 @@ int main(int argc, char **argv)
                         control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
                         for(size_t i = 0; i < action.size(); i++)
                         {
-                            LOGFMTD("Action[%lu] output: %f", i, action[i]);
+                            LOGFMTD("Action[%lu] output BY * 0.25: %f", i, action[i] * 0.25);
                         }
                     }
                     // pub.publish(control_msg);
