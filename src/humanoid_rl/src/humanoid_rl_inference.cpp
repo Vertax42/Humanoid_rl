@@ -1025,6 +1025,45 @@ int main(int argc, char **argv)
                         kd[N_HAND_JOINTS + i] = 10.0;
                         torque[N_HAND_JOINTS + i] = 0.0;
                     }
+                    for(int i = 0; i < leftarmPubIndex.size(); i++)
+                    {
+                        pos_des[leftarmPubIndex[i]] = leftarm_joints[i];
+                        vel_des[leftarmPubIndex[i]] = 0.0;
+                        if(start_move)
+                        {
+                            kp[leftarmPubIndex[i]] = arm_move_kp[i];
+                            kd[leftarmPubIndex[i]] = arm_move_kd[i];
+                        } else
+                        {
+                            kp[leftarmPubIndex[i]] = 300.0;
+                            kd[leftarmPubIndex[i]] = 10.0;
+                        }
+                        torque[leftarmPubIndex[i]] = 0.0;
+                        LOGFMTE("start_move:%s, leftarmpos_des[%d]:%f", start_move ? "true" : "false", i,
+                                pos_des[leftarmPubIndex[i]]);
+                        LOGFMTE("kp[%d]:%f, kd[%d]:%f", i, kp[leftarmPubIndex[i]], i, kd[leftarmPubIndex[i]]);
+                    }
+
+                    for(int i = 0; i < rightarmPubIndex.size(); i++)
+                    {
+                        pos_des[rightarmPubIndex[i]] = rightarm_joints[i];
+                        vel_des[rightarmPubIndex[i]] = 0.0;
+                        if(start_move)
+                        {
+                            kp[rightarmPubIndex[i]] = arm_move_kp[i];
+                            kd[rightarmPubIndex[i]] = arm_move_kd[i];
+                        } else
+                        {
+                            kp[rightarmPubIndex[i]] = 300.0;
+                            kd[rightarmPubIndex[i]] = 10.0;
+                        }
+                        torque[rightarmPubIndex[i]] = 0.0;
+                        LOGFMTE("start_move:%s,rightarmPubIndex[%d]:%f", start_move ? "true" : "false", i,
+                                pos_des[rightarmPubIndex[i]]);
+                        LOGFMTE("kp[%d]:%f,kd[%d]:%f", i, kp[rightarmPubIndex[i]], i, kd[rightarmPubIndex[i]]);
+                    }
+                    start_move = false;
+                    
                     control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
                     pub.publish(control_msg);
                     break;
