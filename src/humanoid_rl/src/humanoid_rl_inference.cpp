@@ -653,6 +653,31 @@ void callback(const std_msgs::Float64MultiArray::ConstPtr &msg)
     return;
 }
 
+void callbackJoints(const sensor_msgs::JointState::ConstPtr &msg)
+{   
+  
+    leftarm_joints.clear();
+    rightarm_joints.clear();
+    int j = 0;
+    int l = 0;
+    for(size_t i = 0; i < msg->name.size(); ++i)
+    {
+
+        if(std::find(leftarmIndex.begin(), leftarmIndex.end(), i) != leftarmIndex.end())
+        {
+            leftarm_joints[j] = msg->position[i];
+            j++;
+        }
+        // 判断 i 是否在 rightarmIndex 中
+        else if(std::find(rightarmIndex.begin(), rightarmIndex.end(), i) != rightarmIndex.end())
+        {
+            rightarm_joints[l] = msg->position[i];
+            l++;
+        }
+    }
+    start_move = true;
+}
+
 int main(int argc, char **argv)
 {
     // log4z  
@@ -669,7 +694,8 @@ int main(int argc, char **argv)
 
     ros::Publisher pub = nh.advertise<std_msgs::Float64MultiArray>("/policy_input", 1);
     ros::Subscriber sub = nh.subscribe("/controllers/xbot_controller/policy_output", 1, callback, ros::TransportHints().tcpNoDelay());
-    ros::Subscriber joint_states_sub = nh.subscribe("/RXjoint_states", 1, Jointscallback, ros::TransportHints().tcpNoDelay());
+    ros::Subscriber joint_states_sub = nh.subscribe("/RXjoint_states", 1, callbackJoints, ros::TransportHints().tcpNoDelay());
+    ros::Publisher joint_state_pub = nh.advertise<sensor_msgs::JointState>("/xbot_joints_pub", 1);
     
     std::this_thread::sleep_for(std::chrono::seconds(3));
  
@@ -753,6 +779,7 @@ int main(int argc, char **argv)
     constexpr unsigned long transition_duration = 500; // 5s（control frequency 100Hz）
     std::vector<double> init_pos;
     std::vector<double> stand_pos;
+    ros::Rate rate(100); // control frequency 100Hz
     while(ros::ok())
     {   
         // static std::vector<double> default_pos;
@@ -796,7 +823,7 @@ int main(int argc, char **argv)
                 // add logs for debug
                 // LOGFMTD("Pub joint %d command message: pos_des = %.2f, vel_des = %.2f, kp = %.2f, kd = %.2f, torque = %.2f", i, pos_des[i], vel_des[i], kp[i], kd[i], torque[i]);
             }
-            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
             pub.publish(control_msg);
             LOGE("ROS Shut Down!");
             ros::shutdown();
@@ -811,23 +838,35 @@ int main(int argc, char **argv)
             hist_yaw_.push_back(euler.yaw * -1.0);
             if(hist_yaw_.size() >= HIST_YAW_SIZE)
                 hist_yaw_.pop_front();
-            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
             pub.publish(control_msg);
             LOGFMTI("In startup loop, time cycle: %ld", cycle_count);
             
             auto duration = std::chrono::steady_clock::now() - start_time;
-            auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-            int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
+            // auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+            // int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
             LOGFMTA("Startup loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
-            std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+            // std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+            rate.sleep();
             ros::spinOnce();
             continue;
         } else if(cycle_count <= init_cycle && !initFlag) {
+            
             // upper body init to damping mode
-            double percentange = double(cycle_count - startup_cycle) / (init_cycle - startup_cycle);
+            double percentage = double(cycle_count - startup_cycle) / double(init_cycle - startup_cycle);
+            double phase_scale = 0.0;
+
+            if(percentage <= 0.5)
+            {
+                phase_scale = 1.0 - 2.0 * percentage; // 1.0 -> 0.0
+            } else
+            {
+                phase_scale = 2.0 * (percentage - 0.5); // 0.0 -> 1.0
+            }
+
             for(int i = 0; i < N_HAND_JOINTS; i++)
             {
-                pos_des[i] = init_pos[6 + i] + percentange * (0.0 - init_pos[6 + i]);
+                pos_des[i] = init_pos[6 + i] * phase_scale;
                 vel_des[i] = 0.0;
                 kp[i] = 200.0;
                 kd[i] = 10.0;
@@ -836,21 +875,23 @@ int main(int argc, char **argv)
             // lower body init to damping mode
             for(int i = 0; i < N_LEG_JOINTS; i++)
             {
-                pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] + percentange * (0.0 - init_pos[6 + N_HAND_JOINTS + i]);
+                pos_des[N_HAND_JOINTS + i] = init_pos[6 + N_HAND_JOINTS + i] * phase_scale;
                 vel_des[N_HAND_JOINTS + i] = 0.0;
                 kp[N_HAND_JOINTS + i] = 300.0;
                 kd[N_HAND_JOINTS + i] = 10.0;
                 torque[N_HAND_JOINTS + i] = 0.0;
             }
-            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+            LOGFMTI("Transitioning from startup mode to init mode, percentage, phase_scale: %.6f, %.6f", percentage, phase_scale);
+            control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
             pub.publish(control_msg);
             LOGFMTI("In init cycle loop, time cycle: %ld", cycle_count);
 
             auto duration = std::chrono::steady_clock::now() - start_time;
-            auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-            int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
+            // auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+            // int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
             LOGFMTA("Init loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
-            std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+            // std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+            rate.sleep();
             ros::spinOnce();
             continue;
         } else if(cycle_count > init_cycle && !initFlag) {
@@ -890,7 +931,7 @@ int main(int argc, char **argv)
                         kd[N_HAND_JOINTS + i] = 10.0;
                         torque[N_HAND_JOINTS + i] = 0.0;
                     }
-                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
                     pub.publish(control_msg);
                     break;
                 case HumanoidStateMachine::ZERO_POS:
@@ -905,7 +946,7 @@ int main(int argc, char **argv)
                     }
                     if(is_transitioning) {
                         double percentage = double(cycle_count - transition_start_cycle) / transition_duration;
-                        if(percentage > 1.0)
+                        if(percentage >= 1.0)
                         {
                             percentage = 1.0;
                             is_transitioning = false; // state transitioning down 
@@ -932,9 +973,9 @@ int main(int argc, char **argv)
                             kd[N_HAND_JOINTS + i] = 10.0;
                             torque[N_HAND_JOINTS + i] = 0.0;
                         }
-                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
                         pub.publish(control_msg);
-                        LOGFMTW("Transitioning from DAMPING mode to ZERO_POS mode, percentage: %.2f", percentage);
+                        LOGFMTW("Transitioning from DAMPING mode to ZERO_POS mode, percentage: %.6f", percentage);
                         break;
                     } else {
                         for(int i = 0; i < N_HAND_JOINTS; i++)
@@ -954,7 +995,7 @@ int main(int argc, char **argv)
                             kd[N_HAND_JOINTS + i] = 10.0;
                             torque[N_HAND_JOINTS + i] = 0.0;
                         }
-                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
                         pub.publish(control_msg);
                         LOGW("Normal ZERO_POS mode, keep sending zero position command.");
                         break;
@@ -984,7 +1025,7 @@ int main(int argc, char **argv)
                         kd[N_HAND_JOINTS + i] = 10.0;
                         torque[N_HAND_JOINTS + i] = 0.0;
                     }
-                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                    control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
                     pub.publish(control_msg);
                     break;
                 case HumanoidStateMachine::WALK:
@@ -1012,10 +1053,11 @@ int main(int argc, char **argv)
                         LOGE("ERROR in get_current_obs()!!"); 
                         // LOGFMTI("In main while loop, time cycle: %ld", cycle_count);
                         auto duration = std::chrono::steady_clock::now() - start_time;
-                        auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-                        int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
+                        // auto micro_sec = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+                        // int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
                         LOGFMTA("Startup loop cycle process time: %ld us", std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
-                        std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+                        // std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+                        rate.sleep();
                         ros::spinOnce();
                         continue;
                     }
@@ -1071,7 +1113,7 @@ int main(int argc, char **argv)
                         {
                             kp[i] = 15.0;
                         }
-                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
                         for(size_t i = 0; i < action.size(); i++)
                         {
                             LOGFMTD("Action[%lu] output by * 0.3: %f", i, action[i] * 0.3);
@@ -1121,7 +1163,7 @@ int main(int argc, char **argv)
                             kp[N_HAND_JOINTS + i] = 350.0;
                             kd[N_HAND_JOINTS + i] = 10.0;
                         }
-                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque);
+                        control_msg = BodyJointCommandWraper(pos_des, vel_des, kp, kd, torque, joint_state_pub);
                         for(size_t i = 0; i < action.size(); i++)
                         {
                             LOGFMTD("Action[%lu] output BY * 0.25: %f", i, action[i] * 0.25);
@@ -1145,9 +1187,10 @@ int main(int argc, char **argv)
         else {
             LOGFMTA("The whole cycle process time: %ld us", micro_sec);
         }
-        int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
-        LOGFMTW("Cycle sleep time: %d us", sleep_time);
-        std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+        // int sleep_time = 1000000 / CONTROL_FREQUENCY - micro_sec;
+        // LOGFMTW("Cycle sleep time: %d us", sleep_time);
+        // std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+        rate.sleep();
         ros::spinOnce();
     }
     if(inputThread.joinable())
