@@ -767,7 +767,7 @@ int main(int argc, char **argv)
 
     unsigned long cycle_count = 0;
     constexpr unsigned long startup_cycle = 100;
-    constexpr unsigned long init_cycle = 500;
+    constexpr unsigned long init_cycle = 700;
     constexpr unsigned long MAXCYCLE = 720000; // 2 hours
     
     bool initFlag = false;
