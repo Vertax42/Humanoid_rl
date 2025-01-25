@@ -8,9 +8,8 @@
 #include <algorithm>
 #include <array>
 #include <std_msgs/Float64MultiArray.h>
-#include <sensor_msgs/JointState.h>
+#include "body_control.h"
 #include "humanoid_policy.h"
-
 
 struct JointConfig {
     int id;
@@ -76,6 +75,56 @@ std::vector<float> get_current_obs(std::vector<double> &init_pos, std::vector<fl
 
 void callback(const std_msgs::Float64MultiArray::ConstPtr &msg);
 
-void Jointscallback(const sensor_msgs::JointState::ConstPtr &msg);
+void callbackJoints(const sensor_msgs::JointState::ConstPtr &msg);
+
+bool start_move = false;
+
+std::vector<double> leftarm_joints(7, 0.0);
+
+std::vector<double> rightarm_joints(7, 0.0);
+
+std::vector<int> leftarmIndex = { 
+    static_cast<int>(JointsNameWithHands::LEFT_ARM_YAW_JOINT),
+    static_cast<int>(JointsNameWithHands::LEFT_ELBOW_PITCH_JOINT),
+    static_cast<int>(JointsNameWithHands::LEFT_ELBOW_YAW_JOINT),
+    static_cast<int>(JointsNameWithHands::LEFT_SHOULDER_PITCH_JOINT),
+    static_cast<int>(JointsNameWithHands::LEFT_SHOULDER_ROLL_JOINT),
+    static_cast<int>(JointsNameWithHands::LEFT_WRIST_ROLL_JOINT),
+    static_cast<int>(JointsNameWithHands::LEFT_WRIST_YAW_JOINT)
+};
+
+std::vector<int> leftarmPubIndex= { 
+    static_cast<int>(JointsName::LEFT_ARM_YAW_JOINT),       
+    static_cast<int>(JointsName::LEFT_ELBOW_PITCH_JOINT),
+    static_cast<int>(JointsName::LEFT_ELBOW_YAW_JOINT),     
+    static_cast<int>(JointsName::LEFT_SHOULDER_PITCH_JOINT),
+    static_cast<int>(JointsName::LEFT_SHOULDER_ROLL_JOINT), 
+    static_cast<int>(JointsName::LEFT_WRIST_ROLL_JOINT),
+    static_cast<int>(JointsName::LEFT_WRIST_YAW_JOINT)
+};
+
+std::vector<int> rightarmIndex = { 
+    static_cast<int>(JointsNameWithHands::RIGHT_ARM_YAW_JOINT),
+    static_cast<int>(JointsNameWithHands::RIGHT_ELBOW_PITCH_JOINT),
+    static_cast<int>(JointsNameWithHands::RIGHT_ELBOW_YAW_JOINT),
+    static_cast<int>(JointsNameWithHands::RIGHT_SHOULDER_PITCH_JOINT),
+    static_cast<int>(JointsNameWithHands::RIGHT_SHOULDER_ROLL_JOINT),
+    static_cast<int>(JointsNameWithHands::RIGHT_WRIST_ROLL_JOINT),
+    static_cast<int>(JointsNameWithHands::RIGHT_WRIST_YAW_JOINT)
+};
+
+std::vector<int> rightarmPubIndex = {
+    static_cast<int>(JointsName::RIGHT_ARM_YAW_JOINT),       
+    static_cast<int>(JointsName::RIGHT_ELBOW_PITCH_JOINT),
+    static_cast<int>(JointsName::RIGHT_ELBOW_YAW_JOINT),     
+    static_cast<int>(JointsName::RIGHT_SHOULDER_PITCH_JOINT),
+    static_cast<int>(JointsName::RIGHT_SHOULDER_ROLL_JOINT), 
+    static_cast<int>(JointsName::RIGHT_WRIST_ROLL_JOINT),
+    static_cast<int>(JointsName::RIGHT_WRIST_YAW_JOINT)
+};
+
+std::vector<double> arm_move_kp={50.0, 40.0, 25.0, 50.0, 15.0, 15.0, 15.0};
+
+std::vector<double> arm_move_kd={25.0, 10.0, 15.0, 10.0, 10.0, 5.0, 10.0};
 
 #endif // HUMANOID_RL_INFERENCE_H
